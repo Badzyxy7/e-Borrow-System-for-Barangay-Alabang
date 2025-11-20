@@ -1,10 +1,10 @@
 <?php
 session_start();
-include "../landingpage/db.php"; // adjust path
+include "../db.php"; // adjust path
 
 // Redirect if not admin
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'admin') {
-    header("Location: ../landingpage/login.php");
+    header("Location: ../login.php");
     exit();
 }
 

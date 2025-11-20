@@ -1,10 +1,10 @@
-<?php
+  <?php
 session_start();
-include "../landingpage/db.php"; // adjust path to your db.php
+include "../db.php"; // adjust path to your db.php
 
 // Redirect if not admin
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'admin') {
-    header("Location: ../landingpage/login.php");
+    header("Location: ../login.php");
     exit();
 }
 
@@ -19,156 +19,273 @@ $available_eq = $conn->query($available_eq_sql)->fetch_assoc()['c'];
 $pending_req = $conn->query($pending_req_sql)->fetch_assoc()['c'];
 $borrowed_eq = $conn->query($borrowed_eq_sql)->fetch_assoc()['c'];
 
-// --- Recent Equipment ---
-$recent_eq_sql = "SELECT * FROM equipment ORDER BY id DESC LIMIT 5";
-$recent_eq = $conn->query($recent_eq_sql);
+// --- Upcoming Due (within 3 days) ---
+$upcoming_due_sql = "
+    SELECT bl.*, u.name AS user_name, e.name AS equipment_name
+    FROM borrow_logs bl
+    JOIN users u ON bl.user_id = u.id
+    JOIN equipment e ON bl.equipment_id = e.id
+    WHERE bl.actual_return_date IS NULL
+      AND bl.expected_return_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 3 DAY)
+    ORDER BY bl.expected_return_date ASC
+";
+$upcoming_due = $conn->query($upcoming_due_sql);
 
-// --- Recent Requests ---
-$recent_req_sql = "SELECT br.id, u.name AS user_name, e.name AS equipment, br.status, br.created_at
-                   FROM borrow_requests br
-                   JOIN users u ON br.user_id = u.id
-                   JOIN equipment e ON br.equipment_id = e.id
-                   ORDER BY br.created_at DESC LIMIT 5";
-$recent_req = $conn->query($recent_req_sql);
+// --- Past Due ---
+$past_due_sql = "
+    SELECT bl.*, u.name AS user_name, e.name AS equipment_name
+    FROM borrow_logs bl
+    JOIN users u ON bl.user_id = u.id
+    JOIN equipment e ON bl.equipment_id = e.id
+    WHERE bl.actual_return_date IS NULL
+      AND bl.expected_return_date < CURDATE()
+    ORDER BY bl.expected_return_date ASC
+";
+$past_due = $conn->query($past_due_sql);
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Admin Dashboard</title>
+  <title>E-Borrow System | Admin Dashboard</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/feather-icons"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: {
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* subtle shadow for the slide panel backdrop when open */
+    .panel-open-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.25);
+      z-index: 40;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .25s ease;
+    }
+    .panel-open-backdrop.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+  </style>
 </head>
-<body class="flex bg-gray-100 min-h-screen">
+
+<body class="flex bg-gradient-to-br from-slate-50 to-blue-50 min-h-screen text-sm">
 
   <!-- Sidebar -->
   <?php include "admin_sidebar.php"; ?>
+  <!-- Header -->
+  <?php 
+    $page_title = "Admin Dashboard"; 
+    include "header_admin.php"; 
+  ?>
+  
 
   <!-- Main Content -->
-  <main class="flex-1 ml-64 p-10">
-    <h1 class="text-3xl font-bold mb-8 text-gray-800">Admin Dashboard</h1>
+  <main class="flex-1 ml-64 flex flex-col min-h-screen">
 
-    <!-- Stats Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10">
-      <div class="bg-white p-6 rounded-2xl shadow hover:shadow-lg transition">
-        <div class="flex items-center gap-4">
-          <div class="p-3 bg-blue-100 text-blue-600 rounded-full">
-            <i data-feather="box"></i>
-          </div>
-          <div>
-            <p class="text-sm text-gray-500">Total Equipment</p>
-            <p class="text-2xl font-bold"><?php echo $total_eq; ?></p>
-          </div>
-        </div>
-      </div>
+ 
 
-      <div class="bg-white p-6 rounded-2xl shadow hover:shadow-lg transition">
-        <div class="flex items-center gap-4">
-          <div class="p-3 bg-green-100 text-green-600 rounded-full">
-            <i data-feather="check-circle"></i>
-          </div>
-          <div>
-            <p class="text-sm text-gray-500">Available Items</p>
-            <p class="text-2xl font-bold"><?php echo $available_eq; ?></p>
-          </div>
-        </div>
-      </div>
-
-      <div class="bg-white p-6 rounded-2xl shadow hover:shadow-lg transition">
-        <div class="flex items-center gap-4">
-          <div class="p-3 bg-yellow-100 text-yellow-600 rounded-full">
-            <i data-feather="clock"></i>
-          </div>
-          <div>
-            <p class="text-sm text-gray-500">Pending Requests</p>
-            <p class="text-2xl font-bold"><?php echo $pending_req; ?></p>
-          </div>
-        </div>
-      </div>
-
-      <div class="bg-white p-6 rounded-2xl shadow hover:shadow-lg transition">
-        <div class="flex items-center gap-4">
-          <div class="p-3 bg-purple-100 text-purple-600 rounded-full">
-            <i data-feather="archive"></i>
-          </div>
-          <div>
-            <p class="text-sm text-gray-500">Currently Borrowed</p>
-            <p class="text-2xl font-bold"><?php echo $borrowed_eq; ?></p>
-          </div>
-        </div>
-      </div>
+    <!-- Page Title -->
+    <div class="px-8 py-6 border-b border-gray-200">
+      <h2 class="text-2xl font-semibold text-gray-800">Admin Dashboard</h2>
     </div>
 
-    <!-- Quick Actions -->
-    <div class="flex gap-4 mb-10">
-      <a href="inventory.php" class="bg-blue-900 text-white px-6 py-3 rounded hover:bg-blue-700">Add Equipment</a>
-      <a href="users.php" class="bg-blue-900 text-white px-6 py-3 rounded hover:bg-blue-700">Manage Users</a>
-      <a href="requests.php" class="bg-blue-900 text-white px-6 py-3 rounded hover:bg-blue-700">Review Requests</a>
-    </div>
+    <!-- Page Content -->
+    <div class="flex-1 px-8 py-6">
 
-    <!-- Recent Equipment & Requests -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <!-- Recent Equipment -->
-      <div class="bg-white p-6 rounded-2xl shadow hover:shadow-lg transition">
-        <h2 class="text-lg font-semibold mb-4 text-gray-700">Recent Equipment</h2>
-        <table class="min-w-full divide-y divide-gray-200">
-          <thead class="bg-gray-50">
-            <tr>
-              <th class="px-4 py-2 text-left text-sm font-semibold text-gray-700">Equipment</th>
-              <th class="px-4 py-2 text-left text-sm font-semibold text-gray-700">Category</th>
-              <th class="px-4 py-2 text-left text-sm font-semibold text-gray-700">Availability</th>
-              <th class="px-4 py-2 text-left text-sm font-semibold text-gray-700">Condition</th>
-            </tr>
-          </thead>
-          <tbody class="bg-white divide-y divide-gray-100">
-            <?php while($eq = $recent_eq->fetch_assoc()): ?>
-              <tr>
-                <td class="px-4 py-2"><?php echo htmlspecialchars($eq['name']); ?></td>
-                <td class="px-4 py-2"><?php echo htmlspecialchars($eq['category']); ?></td>
-                <td class="px-4 py-2"><?php echo ucfirst($eq['status']); ?></td>
-                <td class="px-4 py-2"><?php echo htmlspecialchars($eq['condition']); ?></td>
-              </tr>
-            <?php endwhile; ?>
-          </tbody>
-        </table>
+      <!-- Stats Cards -->
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-10">
+        <div class="bg-white/70 backdrop-blur-sm border border-white/20 p-6 rounded-3xl shadow-xl hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium text-gray-600 mb-1">Total Equipment</p>
+              <p class="text-3xl font-bold text-gray-900"><?php echo htmlspecialchars($total_eq); ?></p>
+              <p class="text-sm text-blue-600 font-medium">All items</p>
+            </div>
+            <div class="p-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-2xl shadow-lg">
+              <i data-feather="box" class="w-6 h-6"></i>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white/70 backdrop-blur-sm border border-white/20 p-6 rounded-3xl shadow-xl hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium text-gray-600 mb-1">Available Items</p>
+              <p class="text-3xl font-bold text-gray-900"><?php echo htmlspecialchars($available_eq); ?></p>
+              <p class="text-sm text-green-600 font-medium">Ready to use</p>
+            </div>
+            <div class="p-4 bg-gradient-to-br from-green-500 to-green-600 text-white rounded-2xl shadow-lg">
+              <i data-feather="check-circle" class="w-6 h-6"></i>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white/70 backdrop-blur-sm border border-white/20 p-6 rounded-3xl shadow-xl hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium text-gray-600 mb-1">Pending Requests</p>
+              <p class="text-3xl font-bold text-gray-900"><?php echo htmlspecialchars($pending_req); ?></p>
+              <p class="text-sm text-yellow-600 font-medium">Needs review</p>
+            </div>
+            <div class="p-4 bg-gradient-to-br from-yellow-500 to-yellow-600 text-white rounded-2xl shadow-lg">
+              <i data-feather="clock" class="w-6 h-6"></i>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white/70 backdrop-blur-sm border border-white/20 p-6 rounded-3xl shadow-xl hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium text-gray-600 mb-1">Currently Borrowed</p>
+              <p class="text-3xl font-bold text-gray-900"><?php echo htmlspecialchars($borrowed_eq); ?></p>
+              <p class="text-sm text-purple-600 font-medium">In use</p>
+            </div>
+            <div class="p-4 bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-2xl shadow-lg">
+              <i data-feather="archive" class="w-6 h-6"></i>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <!-- Recent Requests -->
-      <div class="bg-white p-6 rounded-2xl shadow hover:shadow-lg transition">
-        <h2 class="text-lg font-semibold mb-4 text-gray-700">Recent Requests</h2>
-        <table class="min-w-full divide-y divide-gray-200">
-          <thead class="bg-gray-50">
-            <tr>
-              <th class="px-4 py-2 text-left text-sm font-semibold text-gray-700">Name</th>
-              <th class="px-4 py-2 text-left text-sm font-semibold text-gray-700">Equipment</th>
-              <th class="px-4 py-2 text-left text-sm font-semibold text-gray-700">Date</th>
-              <th class="px-4 py-2 text-left text-sm font-semibold text-gray-700">Status</th>
-            </tr>
-          </thead>
-          <tbody class="bg-white divide-y divide-gray-100">
-            <?php while($req = $recent_req->fetch_assoc()): ?>
-              <tr>
-                <td class="px-4 py-2"><?php echo htmlspecialchars($req['user_name']); ?></td>
-                <td class="px-4 py-2"><?php echo htmlspecialchars($req['equipment']); ?></td>
-                <td class="px-4 py-2"><?php echo date("M d, Y", strtotime($req['created_at'])); ?></td>
-                <td class="px-4 py-2">
-                  <span class="px-2 py-1 rounded text-sm <?php 
-                    echo $req['status']=='pending'?'bg-yellow-100 text-yellow-700':
-                         ($req['status']=='approved'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'); ?>">
-                    <?php echo ucfirst($req['status']); ?>
-                  </span>
-                </td>
-              </tr>
-            <?php endwhile; ?>
-          </tbody>
-        </table>
+      <!-- Quick Actions -->
+      <div class="mb-10">
+        <h3 class="text-lg font-semibold text-gray-800 mb-3">Quick Actions</h3>
+        <div class="flex flex-wrap gap-4">
+          <a href="inventory.php" class="group bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-3 rounded-2xl hover:from-blue-700 hover:to-blue-800 transition-all duration-300 shadow-lg transform hover:-translate-y-1 flex items-center gap-2">
+            <i data-feather="plus" class="w-5 h-5"></i>
+            <span class="font-medium">Add Equipment</span>
+          </a>
+          <a href="users_tab.php" class="group bg-gradient-to-r from-green-600 to-green-700 text-white px-6 py-3 rounded-2xl hover:from-green-700 hover:to-green-800 transition-all duration-300 shadow-lg transform hover:-translate-y-1 flex items-center gap-2">
+            <i data-feather="users" class="w-5 h-5"></i>
+            <span class="font-medium">Manage Users</span>
+          </a>
+          <a href="requests_tab.php" class="group bg-gradient-to-r from-purple-600 to-purple-700 text-white px-6 py-3 rounded-2xl hover:from-purple-700 hover:to-purple-800 transition-all duration-300 shadow-lg transform hover:-translate-y-1 flex items-center gap-2">
+            <i data-feather="clipboard" class="w-5 h-5"></i>
+            <span class="font-medium">Review Requests</span>
+          </a>
+        </div>
       </div>
-    </div>
+
+      <!-- Upcoming & Past Due -->
+      <div class="grid grid-cols-1 xl:grid-cols-2 gap-8">
+
+        <!-- Upcoming Due -->
+        <div class="bg-white rounded-3xl shadow-xl overflow-hidden">
+          <div class="p-6 border-b border-gray-100 flex items-center justify-between">
+            <h4 class="text-lg font-semibold text-gray-800">Upcoming Due Returns</h4>
+            <div class="text-sm text-gray-500">Due within 3 days</div>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th class="px-6 py-3 text-left text-sm font-medium text-gray-700">Borrower</th>
+                  <th class="px-6 py-3 text-left text-sm font-medium text-gray-700">Equipment</th>
+                  <th class="px-6 py-3 text-left text-sm font-medium text-gray-700">Qty</th>
+                  <th class="px-6 py-3 text-left text-sm font-medium text-gray-700">Due Date</th>
+                  <th class="px-6 py-3 text-left text-sm font-medium text-gray-700">Status</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100">
+                <?php if($upcoming_due && $upcoming_due->num_rows): ?>
+                  <?php while($r = $upcoming_due->fetch_assoc()): ?>
+                    <tr class="hover:bg-gray-50 transition-colors">
+                      <td class="px-6 py-3"><?php echo htmlspecialchars($r['user_name']); ?></td>
+                      <td class="px-6 py-3"><?php echo htmlspecialchars($r['equipment_name']); ?></td>
+                      <td class="px-6 py-3"><?php echo (int)$r['qty']; ?></td>
+                      <td class="px-6 py-3 font-medium text-blue-600"><?php echo date("M d, Y", strtotime($r['expected_return_date'])); ?></td>
+                      <td class="px-6 py-3"><span class="px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-sm font-medium">Upcoming</span></td>
+                    </tr>
+                  <?php endwhile; ?>
+                <?php else: ?>
+                  <tr>
+                    <td colspan="5" class="px-6 py-4 text-center text-gray-500">No upcoming returns in the next 3 days.</td>
+                  </tr>
+                <?php endif; ?>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Past Due -->
+        <div class="bg-white rounded-3xl shadow-xl overflow-hidden">
+          <div class="p-6 border-b border-gray-100 flex items-center justify-between">
+            <h4 class="text-lg font-semibold text-gray-800">Past Due Returns</h4>
+            <div class="text-sm text-red-600">Overdue</div>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th class="px-6 py-3 text-left text-sm font-medium text-gray-700">Borrower</th>
+                  <th class="px-6 py-3 text-left text-sm font-medium text-gray-700">Equipment</th>
+                  <th class="px-6 py-3 text-left text-sm font-medium text-gray-700">Qty</th>
+                  <th class="px-6 py-3 text-left text-sm font-medium text-gray-700">Due Date</th>
+                  <th class="px-6 py-3 text-left text-sm font-medium text-gray-700">Status</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100">
+                <?php if($past_due && $past_due->num_rows): ?>
+                  <?php while($r = $past_due->fetch_assoc()): ?>
+                    <tr class="hover:bg-gray-50 transition-colors">
+                      <td class="px-6 py-3"><?php echo htmlspecialchars($r['user_name']); ?></td>
+                      <td class="px-6 py-3"><?php echo htmlspecialchars($r['equipment_name']); ?></td>
+                      <td class="px-6 py-3"><?php echo (int)$r['qty']; ?></td>
+                      <td class="px-6 py-3 font-medium text-red-600"><?php echo date("M d, Y", strtotime($r['expected_return_date'])); ?></td>
+                      <td class="px-6 py-3"><span class="px-3 py-1 rounded-full bg-red-50 text-red-700 text-sm font-medium">Overdue</span></td>
+                    </tr>
+                  <?php endwhile; ?>
+                <?php else: ?>
+                  <tr>
+                    <td colspan="5" class="px-6 py-4 text-center text-gray-500">No past due items.</td>
+                  </tr>
+                <?php endif; ?>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div> <!-- /Upcoming & Past Due -->
+
+    </div> <!-- /Page Content -->
+
+    <!-- Footer -->
+    <footer >
+      <?php include "footer_admin.php"; ?>
+    </footer>
 
   </main>
 
+ 
+
+
   <script>
     feather.replace();
+
+
+
   </script>
+
+
+
+
 </body>
 </html>
