@@ -1,5 +1,6 @@
 <?php
 session_start();
+include "../db.php";
 
 // Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
@@ -8,13 +9,47 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 $page_title = "Edit Profile";
+$user_id = $_SESSION['user_id'];
 
-// Get user data from session
-$name = $_SESSION['name'] ?? '';
-$email = $_SESSION['email'] ?? '';
-$barangay = $_SESSION['barangay'] ?? 'Alabang';
-$street = $_SESSION['street'] ?? '';
-$landmark = $_SESSION['landmark'] ?? '';
+// Fetch current user data from database
+$stmt = $conn->prepare("SELECT name, email, phone_number, birthdate, barangay, street, landmark FROM users WHERE id = ?");
+$stmt->bind_param("i", $user_id);
+$stmt->execute();
+$result = $stmt->get_result();
+
+if ($result->num_rows > 0) {
+    $user_data = $result->fetch_assoc();
+    
+    // Use database values, update session if needed
+    $name = $user_data['name'];
+    $email = $user_data['email'];
+    $phone_number = $user_data['phone_number'] ?? '';
+    $birthdate = $user_data['birthdate'] ?? '';
+    $barangay = $user_data['barangay'] ?? 'Alabang';
+    $street = $user_data['street'] ?? '';
+    $landmark = $user_data['landmark'] ?? '';
+    
+    // Update session with current values
+    $_SESSION['name'] = $name;
+    $_SESSION['email'] = $email;
+    $_SESSION['phone_number'] = $phone_number;
+    $_SESSION['birthdate'] = $birthdate;
+    $_SESSION['barangay'] = $barangay;
+    $_SESSION['street'] = $street;
+    $_SESSION['landmark'] = $landmark;
+} else {
+    // Fallback to session values if database query fails
+    $name = $_SESSION['name'] ?? '';
+    $email = $_SESSION['email'] ?? '';
+    $phone_number = $_SESSION['phone_number'] ?? '';
+    $birthdate = $_SESSION['birthdate'] ?? '';
+    $barangay = $_SESSION['barangay'] ?? 'Alabang';
+    $street = $_SESSION['street'] ?? '';
+    $landmark = $_SESSION['landmark'] ?? '';
+}
+
+$stmt->close();
+$conn->close();
 ?>
 
 <!DOCTYPE html>
@@ -66,6 +101,23 @@ $landmark = $_SESSION['landmark'] ?? '';
                                        name="email" 
                                        value="<?php echo htmlspecialchars($email); ?>" 
                                        required
+                                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            </div>
+
+                            <div>
+                                <label class="block text-gray-700 font-medium mb-2">Phone Number</label>
+                                <input type="tel" 
+                                       name="phone_number" 
+                                       value="<?php echo htmlspecialchars($phone_number); ?>" 
+                                       placeholder="09XX XXX XXXX"
+                                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            </div>
+
+                            <div>
+                                <label class="block text-gray-700 font-medium mb-2">Birthdate</label>
+                                <input type="date" 
+                                       name="birthdate" 
+                                       value="<?php echo htmlspecialchars($birthdate); ?>" 
                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                             </div>
                         </div>
@@ -185,7 +237,7 @@ $landmark = $_SESSION['landmark'] ?? '';
                     // Update session data display after 1 second
                     setTimeout(() => {
                         // Optionally redirect back or reload
-                        window.location.href = 'resident_dashboard.php'; // or wherever your main page is
+                        window.location.href = 'resident_dashboard.php';
                     }, 1500);
                 } else {
                     showMessage(data.message, 'error');

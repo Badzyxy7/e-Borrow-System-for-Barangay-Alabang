@@ -44,6 +44,45 @@ if (isset($_POST['email']) && trim($_POST['email']) !== '') {
     $types .= "s";
 }
 
+// Phone Number
+if (isset($_POST['phone_number'])) {
+    $phone = trim($_POST['phone_number']);
+    
+    // Optional: Validate Philippine phone number format (if not empty)
+    if ($phone !== '' && !preg_match('/^(09|\+639)\d{9}$/', $phone)) {
+        echo json_encode(['success' => false, 'message' => 'Invalid phone number format. Use 09XXXXXXXXX']);
+        exit();
+    }
+    
+    $fields[] = "phone_number=?";
+    $params[] = $phone;
+    $types .= "s";
+}
+
+// Birthdate
+if (isset($_POST['birthdate'])) {
+    $birthdate = trim($_POST['birthdate']);
+    
+    // Optional: Validate date format and reasonable age (if not empty)
+    if ($birthdate !== '') {
+        $date = DateTime::createFromFormat('Y-m-d', $birthdate);
+        if (!$date || $date->format('Y-m-d') !== $birthdate) {
+            echo json_encode(['success' => false, 'message' => 'Invalid birthdate format']);
+            exit();
+        }
+        
+        // Optional: Check if birthdate is not in the future
+        if ($date > new DateTime()) {
+            echo json_encode(['success' => false, 'message' => 'Birthdate cannot be in the future']);
+            exit();
+        }
+    }
+    
+    $fields[] = "birthdate=?";
+    $params[] = $birthdate;
+    $types .= "s";
+}
+
 // Barangay
 if (isset($_POST['barangay']) && trim($_POST['barangay']) !== '') {
     $fields[] = "barangay=?";
@@ -103,6 +142,12 @@ if ($stmt->execute()) {
     }
     if (isset($_POST['email']) && trim($_POST['email']) !== '') {
         $_SESSION['email'] = trim($_POST['email']);
+    }
+    if (isset($_POST['phone_number'])) {
+        $_SESSION['phone_number'] = trim($_POST['phone_number']);
+    }
+    if (isset($_POST['birthdate'])) {
+        $_SESSION['birthdate'] = trim($_POST['birthdate']);
     }
     if (isset($_POST['barangay']) && trim($_POST['barangay']) !== '') {
         $_SESSION['barangay'] = trim($_POST['barangay']);

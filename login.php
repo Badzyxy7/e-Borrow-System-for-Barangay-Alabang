@@ -41,7 +41,7 @@ if (isset($_POST['login']) && empty($error)) {
             
             // ✅ CHECK EMAIL VERIFICATION FIRST
             if ($row['is_verified'] == 0) {
-                $error = "Please verify your email before logging in. Check your inbox for the verification code.";
+                $error = "Invalid login. Check your email or password.";
                 // Don't count as failed attempt - just inform user
             } else {
                 // ✅ Reset login attempts after successful login
@@ -178,7 +178,7 @@ if (isset($_POST['login']) && empty($error)) {
 
           <div class="mt-4 text-center">
             <span class="text-gray-600 text-sm">Don't have an account? </span>
-            <a href="register.php" class="text-blue-900 hover:underline font-medium text-sm">Sign in</a>
+            <a href="register.php" class="text-blue-900 hover:underline font-medium text-sm">Sign Up</a>
           </div>
 
           <div class="mt-4 text-center">
@@ -194,6 +194,7 @@ if (isset($_POST['login']) && empty($error)) {
     </div>
   </div>
 
+  <!-- Password Toggle Script -->
   <script>
     (function(){
       const pwd = document.getElementById('password');
@@ -210,17 +211,51 @@ if (isset($_POST['login']) && empty($error)) {
     })();
   </script>
 
-  <div id="loading-overlay" class="hidden fixed inset-0 bg-gray-900 bg-opacity-60 flex flex-col items-center justify-center z-50">
-    <div class="w-12 h-12 border-4 border-t-transparent border-blue-500 rounded-full animate-spin"></div>
-    <p class="mt-4 text-white text-lg font-semibold animate-pulse">Logging in...</p>
+  <!-- Logging In Animation Modal -->
+  <div id="loading-overlay" class="fixed inset-0 bg-black bg-opacity-60 hidden items-center justify-center z-50">
+    <div class="bg-white rounded-2xl shadow-2xl p-8 w-96 mx-4 text-center">
+      <!-- Spinner -->
+      <div class="mx-auto w-16 h-16 mb-4">
+        <svg class="animate-spin text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+      </div>
+      
+      <!-- Message -->
+      <h2 class="text-2xl font-bold text-gray-800 mb-2">Logging In...</h2>
+      <p class="text-gray-600">Please wait while we log you in</p>
+    </div>
   </div>
 
+  <!-- Form Submit Script -->
   <script>
     const form = document.getElementById("login-form");
     const overlay = document.getElementById("loading-overlay");
-    form.addEventListener("submit", () => {
-      overlay.classList.remove("hidden");
-      setTimeout(() => {}, 10);
+    let isSubmitting = false;
+    
+    form.addEventListener("submit", (e) => {
+      if (!isSubmitting) {
+        e.preventDefault(); // Prevent immediate form submission
+        isSubmitting = true;
+        
+        // Show loading animation
+        overlay.classList.remove("hidden");
+        overlay.classList.add("flex");
+        
+        // Wait 1 second before submitting
+        setTimeout(() => {
+          // Create a hidden input to include the login button value
+          const hiddenInput = document.createElement('input');
+          hiddenInput.type = 'hidden';
+          hiddenInput.name = 'login';
+          hiddenInput.value = '1';
+          form.appendChild(hiddenInput);
+          
+          // Now submit the form
+          form.submit();
+        }, 1000);
+      }
     });
   </script>
 </body>

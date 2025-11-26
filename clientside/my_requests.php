@@ -136,7 +136,7 @@ $result = $conn->query($sql);
       <!-- Desktop Table View -->
       <div class="hidden md:block overflow-x-auto">
         <table class="min-w-full divide-y divide-gray-200">
-          <thead class="bg-gradient-to-r from-blue-500 to-blue-800">
+          <thead class="bg-gradient-to-r from-blue-900 to-blue-700">
             <tr>
               <th class="px-6 py-4 text-left text-xs font-bold text-white uppercase tracking-wider">Equipment</th>
               <th class="px-6 py-4 text-left text-xs font-bold text-white uppercase tracking-wider">Quantity</th>

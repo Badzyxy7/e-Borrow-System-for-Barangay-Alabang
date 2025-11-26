@@ -175,7 +175,7 @@
         </p>
 
         <div class="flex flex-col sm:flex-row justify-center md:justify-start gap-4 sm:gap-6 mt-6 sm:mt-8 px-4 md:px-0">
-          <a href="#equipment" class="group bg-gradient-to-r from-blue-600 to-blue-700 px-6 sm:px-8 py-3 sm:py-4 rounded-xl text-white font-semibold hover:from-blue-700 hover:to-blue-800 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:-translate-y-1 flex items-center justify-center gap-3 text-sm sm:text-base">
+          <a href="login" class="group bg-gradient-to-r from-blue-600 to-blue-700 px-6 sm:px-8 py-3 sm:py-4 rounded-xl text-white font-semibold hover:from-blue-700 hover:to-blue-800 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:-translate-y-1 flex items-center justify-center gap-3 text-sm sm:text-base">
             <i data-feather="package" class="w-4 h-4 sm:w-5 sm:h-5 group-hover:rotate-12 transition-transform duration-300"></i>
             Browse Equipment
           </a>
@@ -384,7 +384,7 @@
           </div>
         </div>
         <div class="text-center md:text-right">
-          <p class="text-sm sm:text-base text-blue-200">&copy; 2024 Barangay Alabang | E-Borrow System</p>
+          <p class="text-sm sm:text-base text-blue-200">&copy; 2025 Barangay Alabang | E-Borrow System</p>
           <p class="text-xs sm:text-sm text-blue-300 mt-1">Empowering communities through accessible equipment sharing</p>
         </div>
       </div>

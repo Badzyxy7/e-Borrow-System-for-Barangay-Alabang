@@ -118,7 +118,7 @@ $result = $conn->query($sql);
     <!-- Page Title -->
     <div class="px-8 py-6 border-b border-gray-200 flex justify-between items-center">
       <h2 class="text-2xl font-semibold text-gray-800">Inventory Management</h2>
-      <button id="openAddModal" class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-3 rounded-2xl hover:from-blue-700 hover:to-blue-800 transition-all duration-300 shadow-lg transform hover:-translate-y-1 flex items-center gap-2">
+      <button id="openAddModal" class="bg-gradient-to-r from-blue-900 to-blue-700 text-white px-6 py-3 rounded-2xl hover:from-blue-700 hover:to-blue-800 transition-all duration-300 shadow-lg transform hover:-translate-y-1 flex items-center gap-2">
         <i data-feather="plus" class="w-5 h-5"></i>
         <span class="font-medium">Add Equipment</span>
       </button>
@@ -143,7 +143,7 @@ $result = $conn->query($sql);
           <option value="available" <?php if($status_filter=="available") echo "selected"; ?>>Available</option>
           <option value="maintenance" <?php if($status_filter=="maintenance") echo "selected"; ?>>Under Maintenance</option>
         </select>
-        <button type="submit" class="bg-blue-600 text-white px-6 py-3 rounded-xl hover:bg-blue-700 transition-all duration-300 shadow-lg flex items-center gap-2">
+        <button type="submit" class="bg-gradient-to-r from-blue-900 to-blue-700 text-white px-6 py-3 rounded-xl hover:bg-blue-700 transition-all duration-300 shadow-lg flex items-center gap-2">
           <i data-feather="search" class="w-5 h-5"></i>
           <span class="font-medium">Filter</span>
         </button>
@@ -158,7 +158,7 @@ $result = $conn->query($sql);
                 <th class="px-6 py-4 text-left text-sm font-semibold text-gray-700">Image</th>
                 <th class="px-6 py-4 text-left text-sm font-semibold text-gray-700">Name</th>
                 <th class="px-6 py-4 text-left text-sm font-semibold text-gray-700">Description</th>
-                <th class="px-6 py-4 text-left text-sm font-semibold text-gray-700">Qty</th>
+                <th class="px-6 py-4 text-left text-sm font-semibold text-gray-700">Quantity</th>
                 <th class="px-6 py-4 text-left text-sm font-semibold text-gray-700">Condition</th>
                 <th class="px-6 py-4 text-left text-sm font-semibold text-gray-700">Borrowed</th>
                 <th class="px-6 py-4 text-left text-sm font-semibold text-gray-700">Status</th>
@@ -191,11 +191,19 @@ $result = $conn->query($sql);
                       <?php echo $row['borrowed_count']; ?>
                     </span>
                   </td>
-                  <td class="px-6 py-4">
-                    <span class="px-3 py-1 rounded-full font-medium <?php echo $row['status']=='available' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'; ?>">
-                      <?php echo ucfirst($row['status']); ?>
-                    </span>
-                  </td>
+                 <td class="px-6 py-4">
+  <?php if($row['status']=='available'): ?>
+    <span class="inline-flex items-center px-3 py-1 rounded-full font-medium bg-green-100 text-green-700">
+      <span class="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
+      Available
+    </span>
+  <?php else: ?>
+    <span class="inline-flex items-center px-3 py-1 rounded-full font-medium bg-yellow-100 text-yellow-700">
+      <span class="w-2 h-2 bg-yellow-500 rounded-full mr-2"></span>
+      Maintenance
+    </span>
+  <?php endif; ?>
+</td>
                   <td class="px-6 py-4 flex gap-3">
                     <button data-modal-target="editModal<?php echo $row['id']; ?>" 
                             class="text-blue-600 hover:text-blue-800 transition" title="Edit">
@@ -343,7 +351,7 @@ $result = $conn->query($sql);
             Cancel
           </button>
           <button type="submit" name="add_equipment" 
-                  class="px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium transition shadow-lg">
+                  class="px-6 py-3 rounded-xl bg-gradient-to-r from-blue-900 to-blue-700 hover:bg-blue-700 text-white font-medium transition shadow-lg">
             Add Equipment
           </button>
         </div>

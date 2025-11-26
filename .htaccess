@@ -1,0 +1,20 @@
+RewriteEngine On
+RewriteBase /equipment_lending/
+
+# Allow direct access to index.php (landing page) and login.php
+RewriteRule ^$ index.php [L]
+RewriteRule ^login$ login.php [L]
+
+# Hide .php extension for all other pages
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_FILENAME}.php -f
+RewriteRule ^(.+)$ $1.php [L,QSA]
+
+# Custom routes for specific pages
+RewriteRule ^dashboard$ pages/dashboard.php [L]
+RewriteRule ^profile$ pages/profile.php [L]
+RewriteRule ^admin$ admin/index.php [L]
+
+# Example: product details with ID
+RewriteRule ^product/([0-9]+)$ product.php?id=$1 [L,QSA]

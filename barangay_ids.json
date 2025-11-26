@@ -1,32 +1,162 @@
-[
-  "BA-1001",
-  "BA-1002",
-  "BA-1003",
-  "BA-1004",
-  "BA-1005",
-  "BA-1006",
-  "BA-1007",
-  "BA-1008",
-  "BA-1009",
-  "BA-1010",
-  "BA-1011",
-  "BA-1012",
-  "BA-1013",
-  "BA-1014",
-  "BA-1015",
-  "BA-1016",
-  "BA-1017",
-  "BA-1018",
-  "BA-1019",
-  "BA-1020",
-  "BA-1021",
-  "BA-1022",
-  "BA-1023",
-  "BA-1024",
-  "BA-1025",
-  "BA-1026",
-  "BA-1027",
-  "BA-1028",
-  "BA-1029",
-  "BA-1030"
-]
+{
+  "BA-1001": {
+    "name": "Juan Dela Cruz",
+    "birthdate": "1990-01-15"
+  },
+  "BA-1002": {
+    "name": "Maria Santos",
+    "birthdate": "1985-03-22"
+  },
+  "BA-1003": {
+    "name": "Pedro Garcia",
+    "birthdate": "1992-07-08"
+  },
+  "BA-1004": {
+    "name": "Ana Reyes",
+    "birthdate": "1988-11-30"
+  },
+  "BA-1005": {
+    "name": "Jose Rodriguez",
+    "birthdate": "1995-05-12"
+  },
+  "BA-1006": {
+    "name": "Carmen Torres",
+    "birthdate": "1991-09-25"
+  },
+  "BA-1007": {
+    "name": "Miguel Fernandez",
+    "birthdate": "1987-02-18"
+  },
+  "BA-1008": {
+    "name": "Sofia Gonzales",
+    "birthdate": "1993-06-04"
+  },
+  "BA-1009": {
+    "name": "Diego Ramos",
+    "birthdate": "1989-12-10"
+  },
+  "BA-1010": {
+    "name": "Isabella Cruz",
+    "birthdate": "1994-04-27"
+  },
+  "BA-1011": {
+    "name": "Antonio Flores",
+    "birthdate": "1986-08-14"
+  },
+  "BA-1012": {
+    "name": "Lucia Mendoza",
+    "birthdate": "1990-10-03"
+  },
+  "BA-1013": {
+    "name": "Carlos Villanueva",
+    "birthdate": "1992-01-20"
+  },
+  "BA-1014": {
+    "name": "Elena Pascual",
+    "birthdate": "1988-05-16"
+  },
+  "BA-1015": {
+    "name": "Rafael Domingo",
+    "birthdate": "1991-09-09"
+  },
+  "BA-1016": {
+    "name": "Valentina Castro",
+    "birthdate": "1987-03-28"
+  },
+  "BA-1017": {
+    "name": "Manuel Navarro",
+    "birthdate": "1993-07-22"
+  },
+  "BA-1018": {
+    "name": "Gabriela Morales",
+    "birthdate": "1989-11-05"
+  },
+  "BA-1019": {
+    "name": "Fernando Jimenez",
+    "birthdate": "1994-02-14"
+  },
+  "BA-1020": {
+    "name": "Rosa Alvarez",
+    "birthdate": "1986-06-30"
+  },
+  "BA-1021": {
+    "name": "Ricardo Romero",
+    "birthdate": "1990-12-18"
+  },
+  "BA-1022": {
+    "name": "Patricia Gutierrez",
+    "birthdate": "1992-04-07"
+  },
+  "BA-1023": {
+    "name": "Alejandro Diaz",
+    "birthdate": "1988-08-24"
+  },
+  "BA-1024": {
+    "name": "Daniela Herrera",
+    "birthdate": "1991-01-11"
+  },
+  "BA-1025": {
+    "name": "Sebastian Medina",
+    "birthdate": "1987-05-29"
+  },
+  "BA-1026": {
+    "name": "Camila Aguilar",
+    "birthdate": "1993-09-15"
+  },
+  "BA-1027": {
+    "name": "Francisco Ortiz",
+    "birthdate": "1989-03-02"
+  },
+  "BA-1028": {
+    "name": "Natalia Vargas",
+    "birthdate": "1994-07-19"
+  },
+  "BA-1029": {
+    "name": "Andres Castillo",
+    "birthdate": "1986-11-26"
+  },
+  "BA-1030": {
+    "name": "Victoria Ruiz",
+    "birthdate": "1990-02-08"
+  },
+  "BA-1031": {
+    "name": "Yuna Kite Delos Santos",
+    "birthdate": "2005-12-01"
+  },
+  "BA-1032": {
+    "name": "Adriana Delgado",
+    "birthdate": "1988-10-21"
+  },
+  "BA-1033": {
+    "name": "Roberto Paredes",
+    "birthdate": "1991-04-05"
+  },
+  "BA-1034": {
+    "name": "Mariana Espinosa",
+    "birthdate": "1987-08-17"
+  },
+  "BA-1035": {
+    "name": "Jorge Salazar",
+    "birthdate": "1993-12-30"
+  },
+  "BA-1036": {
+    "name": "Catalina Vega",
+    "birthdate": "1989-05-23"
+  },
+  "BA-1037": {
+    "name": "Raul Fuentes",
+    "birthdate": "1994-09-06"
+  },
+  "BA-1038": {
+    "name": "Beatriz Luna",
+    "birthdate": "1986-01-28"
+  },
+  "BA-1039": {
+    "name": "Eduardo Pena",
+    "birthdate": "1990-07-14"
+  },
+  "BA-1040": {
+    "name": "Cristina Soto",
+    "birthdate": "1992-11-01"
+  }
+}
