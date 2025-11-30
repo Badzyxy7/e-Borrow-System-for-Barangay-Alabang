@@ -1,3 +1,2 @@
-# Prevent direct access to death certificates
+# Prevent directory listing only
 Options -Indexes
-deny from all

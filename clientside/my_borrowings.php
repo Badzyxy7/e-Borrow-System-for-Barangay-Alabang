@@ -12,17 +12,64 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'resident') {
 
 $user_id = $_SESSION['user_id'];
 
-// Handle return request
+// Handle return request - FINAL VERSION WITH GROUP SUPPORT
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['request_return'])) {
-    $borrow_id = intval($_POST['borrow_id']);
     
-    // Update the borrow log to set return_requested = 1
-    $update_sql = "UPDATE borrow_logs SET return_requested = 1 WHERE id = $borrow_id AND user_id = $user_id";
+    $borrow_id = isset($_POST['borrow_id']) ? intval($_POST['borrow_id']) : 0;
+    $is_group = isset($_POST['is_group']) && $_POST['is_group'] == '1';
+    $group_request_id = isset($_POST['group_request_id']) && !empty($_POST['group_request_id']) ? $conn->real_escape_string($_POST['group_request_id']) : '';
     
-    if ($conn->query($update_sql)) {
-        $_SESSION['success_message'] = "Return request submitted successfully! Staff will be notified shortly.";
+    $current_timestamp = date('Y-m-d H:i:s');
+    
+    if ($borrow_id <= 0) {
+        $_SESSION['error_message'] = "Invalid request data.";
+        header("Location: " . $_SERVER['PHP_SELF']);
+        exit();
+    }
+    
+    // Check if this is part of a group by looking up the borrow_log and its associated request
+    if ($is_group && !empty($group_request_id)) {
+        // GROUP RETURN: Update all borrow_logs with the same group_request_id
+        $sql = "UPDATE borrow_logs bl
+                INNER JOIN borrow_requests br ON bl.request_id = br.id
+                SET bl.return_requested = 1,
+                    bl.return_requested_at = '$current_timestamp'
+                WHERE br.group_request_id = '$group_request_id'
+                AND bl.user_id = $user_id
+                AND bl.actual_return_date IS NULL";
     } else {
-        $_SESSION['error_message'] = "Failed to submit return request.";
+        // SINGLE ITEM RETURN
+        $sql = "UPDATE borrow_logs 
+                SET return_requested = 1,
+                    return_requested_at = '$current_timestamp'
+                WHERE id = $borrow_id
+                AND user_id = $user_id
+                AND actual_return_date IS NULL";
+    }
+    
+    if ($conn->query($sql)) {
+        if ($conn->affected_rows > 0) {
+            $_SESSION['success_message'] = "Return request submitted successfully! Staff will be notified shortly.";
+        } else {
+            // Check why it failed
+            $check = $conn->query("SELECT id, user_id, actual_return_date, return_requested FROM borrow_logs WHERE id = $borrow_id");
+            if ($check && $check->num_rows > 0) {
+                $data = $check->fetch_assoc();
+                if ($data['user_id'] != $user_id) {
+                    $_SESSION['error_message'] = "Permission denied.";
+                } elseif ($data['actual_return_date'] !== null) {
+                    $_SESSION['error_message'] = "This item has already been returned.";
+                } elseif ($data['return_requested'] == 1) {
+                    $_SESSION['error_message'] = "Return request already submitted for this item.";
+                } else {
+                    $_SESSION['error_message'] = "Could not process request.";
+                }
+            } else {
+                $_SESSION['error_message'] = "Borrowing record not found.";
+            }
+        }
+    } else {
+        $_SESSION['error_message'] = "Database error: " . $conn->error;
     }
     
     header("Location: " . $_SERVER['PHP_SELF']);
@@ -38,25 +85,72 @@ $current_page = max(1, $current_page);
 $offset = ($current_page - 1) * $records_per_page;
 
 // Get total number of records
-$count_sql = "SELECT COUNT(*) as total FROM borrow_logs WHERE user_id=$user_id";
+$count_sql = "SELECT COUNT(DISTINCT COALESCE(br.group_request_id, CONCAT('single_', bl.id))) as total 
+              FROM borrow_logs bl
+              LEFT JOIN borrow_requests br ON bl.request_id = br.id
+              WHERE bl.user_id=$user_id";
 $count_result = $conn->query($count_sql);
 $total_records = $count_result->fetch_assoc()['total'];
 $total_pages = ceil($total_records / $records_per_page);
 
-// Get paginated records with user details
-$sql = "SELECT bl.*, 
-        e.name AS equipment, 
-        e.image AS equipment_image,
-        u.name,
-        CONCAT(u.street, ', ', u.barangay, ', ', u.landmark) AS address,
-        u.email,
-        u.avatar
-        FROM borrow_logs bl
-        JOIN equipment e ON bl.equipment_id = e.id
-        JOIN users u ON bl.user_id = u.id
-        WHERE bl.user_id = $user_id
-        ORDER BY bl.borrow_date DESC
-        LIMIT $records_per_page OFFSET $offset";
+// FIXED QUERY: Properly group items even with broken request_id
+$sql = "SELECT 
+    bl.id,
+    bl.user_id,
+    bl.request_id,
+    bl.equipment_id,
+    bl.borrow_date,
+    bl.expected_return_date,
+    bl.actual_pickup_date,
+    bl.actual_return_date,
+    bl.return_requested,
+    bl.return_approved,
+    bl.is_damaged,
+    bl.damage_fee,
+    bl.damage_notes,
+    bl.condition_notes,
+    br.group_request_id,
+    br.borrow_date as group_borrow_date,
+    CASE 
+        WHEN br.group_request_id IS NOT NULL AND br.group_request_id != '' THEN 'group'
+        ELSE 'single'
+    END as borrowing_type,
+    CASE 
+        WHEN br.group_request_id IS NOT NULL AND br.group_request_id != '' THEN (
+            SELECT COUNT(*) FROM borrow_requests 
+            WHERE group_request_id = br.group_request_id
+        )
+        ELSE 1
+    END as item_count,
+    GROUP_CONCAT(DISTINCT e.name ORDER BY e.name SEPARATOR ', ') as equipment_names,
+    GROUP_CONCAT(DISTINCT e.image ORDER BY e.name SEPARATOR ',') as equipment_images,
+    SUM(bl.qty) as total_qty,
+    MAX(bl.is_damaged) as has_damage,
+    SUM(CASE WHEN bl.is_damaged = 1 THEN bl.damage_fee ELSE 0 END) as total_damage_fee,
+    GROUP_CONCAT(CASE WHEN bl.is_damaged = 1 THEN CONCAT(e.name, ': ', bl.damage_notes) END SEPARATOR ' | ') as all_damage_notes,
+    GROUP_CONCAT(DISTINCT bl.condition_notes SEPARATOR ' | ') as all_condition_notes,
+    u.name,
+    CONCAT(u.street, ', ', u.barangay, ', ', u.landmark) AS address,
+    u.email,
+    u.avatar
+FROM borrow_logs bl
+LEFT JOIN borrow_requests br ON bl.request_id = br.id
+JOIN equipment e ON bl.equipment_id = e.id
+JOIN users u ON bl.user_id = u.id
+WHERE bl.user_id = $user_id
+GROUP BY 
+    CASE 
+        WHEN br.group_request_id IS NOT NULL AND br.group_request_id != '' THEN CONCAT('group_', br.group_request_id)
+        ELSE CONCAT('single_', bl.id)
+    END,
+    bl.borrow_date,
+    bl.expected_return_date,
+    bl.actual_pickup_date,
+    bl.actual_return_date,
+    bl.return_requested,
+    bl.return_approved
+ORDER BY bl.borrow_date DESC
+LIMIT $records_per_page OFFSET $offset";
 
 $result = $conn->query($sql);
 
@@ -72,7 +166,7 @@ function getBorrowStatus($row) {
         ];
     } elseif ($row['return_approved'] == 1) {
         return [
-            'label' => 'Return Approved - Prepare for Pickup',
+            'label' => 'Return Approved',
             'bg' => 'bg-purple-100',
             'text' => 'text-purple-700',
             'border' => 'border-purple-300',
@@ -112,6 +206,8 @@ function getBorrowStatus($row) {
         ];
     }
 }
+
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -204,108 +300,133 @@ function getBorrowStatus($row) {
         <?php if ($result->num_rows > 0): ?>
           <?php $result->data_seek(0); ?>
           <?php while ($row = $result->fetch_assoc()): 
-            $status = getBorrowStatus($row);
-            $canRequestReturn = $row['actual_pickup_date'] && !$row['actual_return_date'] && $row['return_requested'] == 0;
-            $isOverdue = !$row['actual_return_date'] && strtotime($row['expected_return_date']) < time();
-          ?>
-            <div class="p-4 border-b border-gray-200 last:border-0 hover:bg-blue-50 transition">
-              <div class="flex items-start gap-3 mb-3">
-                <div class="flex-shrink-0 h-16 w-16 rounded-lg overflow-hidden bg-gray-100 border border-gray-200">
-                  <?php if (!empty($row['equipment_image'])): ?>
-                    <img src="../photos/<?php echo htmlspecialchars($row['equipment_image']); ?>" 
-                        alt="<?php echo htmlspecialchars($row['equipment']); ?>" 
-                        class="h-full w-full object-cover"
-                        onerror="this.parentElement.innerHTML='<div class=\'h-full w-full flex items-center justify-center bg-blue-100\'><i data-feather=\'package\' class=\'text-blue-600 w-6 h-6\'></i></div>'; feather.replace();">
-                  <?php else: ?>
-                    <div class="h-full w-full flex items-center justify-center bg-blue-100">
-                      <i data-feather="package" class="text-blue-600 w-6 h-6"></i>
-                    </div>
-                  <?php endif; ?>
-                </div>
-                <div class="flex-1 min-w-0">
-                  <h3 class="font-semibold text-gray-900 text-sm mb-1"><?php echo htmlspecialchars($row['equipment']); ?></h3>
-                  <?php if ($row['condition_notes']): ?>
-                    <p class="text-xs text-gray-500 mb-2">Condition: <?php echo htmlspecialchars($row['condition_notes']); ?></p>
-                  <?php endif; ?>
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-800">
-                      Qty: <?php echo $row['qty']; ?>
-                    </span>
-                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border <?php echo $status['bg'] . ' ' . $status['text'] . ' ' . $status['border']; ?>">
-                      <i data-feather="<?php echo $status['icon']; ?>" class="w-3 h-3 mr-1"></i>
-                      <?php echo $status['label']; ?>
-                    </span>
-                    <?php if ($isOverdue): ?>
-                      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-300">
-                        <i data-feather="alert-triangle" class="w-3 h-3 mr-1"></i>
-                        Overdue
-                      </span>
-                    <?php endif; ?>
-                  </div>
-                </div>
-              </div>
-              
-              <div class="grid grid-cols-2 gap-2 text-xs text-gray-600 mb-3">
-                <div class="flex items-center">
-                  <i data-feather="calendar" class="w-3 h-3 mr-1 text-gray-500"></i>
-                  <span>Borrowed: <?php echo date("M d, Y", strtotime($row['borrow_date'])); ?></span>
-                </div>
-                <div class="flex items-center">
-                  <i data-feather="calendar" class="w-3 h-3 mr-1 text-gray-500"></i>
-                  <span>Return: <?php echo date("M d, Y", strtotime($row['expected_return_date'])); ?></span>
-                </div>
-              </div>
+  $status = getBorrowStatus($row);
+  $is_group = $row['borrowing_type'] == 'group';
+  $equipment_images = !empty($row['equipment_images']) ? explode(',', $row['equipment_images']) : [];
+  $first_image = !empty($equipment_images) ? $equipment_images[0] : '';
+  $canRequestReturn = $row['actual_pickup_date'] && !$row['actual_return_date'] && $row['return_requested'] == 0;
+  $isOverdue = !$row['actual_return_date'] && strtotime($row['expected_return_date']) < time();
+?>
+  <div class="p-4 border-b border-gray-200 last:border-0 hover:bg-blue-50 transition">
+    <div class="flex items-start gap-3 mb-3">
+      <div class="flex-shrink-0 h-16 w-16 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 relative">
+        <?php if (!empty($first_image)): ?>
+          <img src="../photos/<?php echo htmlspecialchars($first_image); ?>" 
+              alt="Equipment" 
+              class="h-full w-full object-cover"
+              onerror="this.parentElement.innerHTML='<div class=\'h-full w-full flex items-center justify-center bg-blue-100\'><i data-feather=\'package\' class=\'text-blue-600 w-6 h-6\'></i></div>'; feather.replace();">
+        <?php else: ?>
+          <div class="h-full w-full flex items-center justify-center bg-blue-100">
+            <i data-feather="package" class="text-blue-600 w-6 h-6"></i>
+          </div>
+        <?php endif; ?>
+        <?php if ($is_group): ?>
+          <div class="absolute -top-1 -right-1 bg-purple-600 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center shadow-lg">
+            <?php echo $row['item_count']; ?>
+          </div>
+        <?php endif; ?>
+      </div>
+      <div class="flex-1 min-w-0">
+        <?php if ($is_group): ?>
+          <div class="flex items-center gap-2 mb-1">
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-700 border border-purple-300">
+              <i data-feather="layers" class="w-3 h-3 mr-1"></i>
+              Group
+            </span>
+          </div>
+          <h3 class="font-semibold text-gray-900 text-sm mb-1"><?php echo $row['item_count']; ?> Items</h3>
+          <p class="text-xs text-gray-600 line-clamp-2"><?php echo htmlspecialchars($row['equipment_names']); ?></p>
+        <?php else: ?>
+          <h3 class="font-semibold text-gray-900 text-sm mb-1"><?php echo htmlspecialchars($row['equipment_names']); ?></h3>
+        <?php endif; ?>
+        
+        <?php if ($row['all_condition_notes']): ?>
+          <p class="text-xs text-gray-500 mb-2">Condition: <?php echo htmlspecialchars($row['all_condition_notes']); ?></p>
+        <?php endif; ?>
+        
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-800">
+            Qty: <?php echo $row['total_qty']; ?>
+          </span>
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border <?php echo $status['bg'] . ' ' . $status['text'] . ' ' . $status['border']; ?>">
+            <i data-feather="<?php echo $status['icon']; ?>" class="w-3 h-3 mr-1"></i>
+            <?php echo $status['label']; ?>
+          </span>
+          <?php if ($isOverdue): ?>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-300">
+              <i data-feather="alert-triangle" class="w-3 h-3 mr-1"></i>
+              Overdue
+            </span>
+          <?php endif; ?>
+        </div>
+      </div>
+    </div>
+    
+    <div class="grid grid-cols-2 gap-2 text-xs text-gray-600 mb-3">
+      <div class="flex items-center">
+        <i data-feather="calendar" class="w-3 h-3 mr-1 text-gray-500"></i>
+        <span>Borrowed: <?php echo date("M d, Y", strtotime($row['borrow_date'])); ?></span>
+      </div>
+      <div class="flex items-center">
+        <i data-feather="calendar" class="w-3 h-3 mr-1 text-gray-500"></i>
+        <span>Return: <?php echo date("M d, Y", strtotime($row['expected_return_date'])); ?></span>
+      </div>
+    </div>
 
-              <?php if ($row['actual_pickup_date']): ?>
-                <div class="text-xs text-gray-500 mb-2">
-                  <i data-feather="check" class="w-3 h-3 inline mr-1"></i>
-                  Delivered: <?php echo date("M d, Y", strtotime($row['actual_pickup_date'])); ?>
-                </div>
-              <?php endif; ?>
+    <?php if ($row['actual_pickup_date']): ?>
+      <div class="text-xs text-gray-500 mb-2">
+        <i data-feather="check" class="w-3 h-3 inline mr-1"></i>
+        Delivered: <?php echo date("M d, Y", strtotime($row['actual_pickup_date'])); ?>
+      </div>
+    <?php endif; ?>
 
-              <?php if ($row['actual_return_date']): ?>
-                <div class="text-xs text-gray-500 mb-2">
-                  <i data-feather="check-circle" class="w-3 h-3 inline mr-1"></i>
-                  Returned: <?php echo date("M d, Y", strtotime($row['actual_return_date'])); ?>
-                </div>
-              <?php endif; ?>
+    <?php if ($row['actual_return_date']): ?>
+      <div class="text-xs text-gray-500 mb-2">
+        <i data-feather="check-circle" class="w-3 h-3 inline mr-1"></i>
+        Returned: <?php echo date("M d, Y", strtotime($row['actual_return_date'])); ?>
+      </div>
+    <?php endif; ?>
 
-              <?php if ($row['is_damaged'] == 1): ?>
-                <div class="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs">
-                  <div class="flex items-center text-red-700 font-semibold mb-1">
-                    <i data-feather="alert-triangle" class="w-3 h-3 mr-1"></i>
-                    Damage Detected
-                  </div>
-                  <div class="text-red-600">
-                    <strong>Fee:</strong> ₱<?php echo number_format($row['damage_fee'], 2); ?>
-                  </div>
-                  <?php if ($row['damage_notes']): ?>
-                    <div class="text-red-600 mt-1">
-                      <strong>Notes:</strong> <?php echo htmlspecialchars($row['damage_notes']); ?>
-                    </div>
-                  <?php endif; ?>
-                </div>
-              <?php endif; ?>
+    <?php if ($row['has_damage'] == 1): ?>
+      <div class="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs">
+        <div class="flex items-center text-red-700 font-semibold mb-1">
+          <i data-feather="alert-triangle" class="w-3 h-3 mr-1"></i>
+          Damage Detected
+        </div>
+        <div class="text-red-600">
+          <strong>Total Fee:</strong> ₱<?php echo number_format($row['total_damage_fee'], 2); ?>
+        </div>
+        <?php if ($row['all_damage_notes']): ?>
+          <div class="text-red-600 mt-1">
+            <strong>Notes:</strong> <?php echo htmlspecialchars($row['all_damage_notes']); ?>
+          </div>
+        <?php endif; ?>
+      </div>
+    <?php endif; ?>
 
-              <?php if ($canRequestReturn): ?>
-                <button onclick="openReturnModal(<?php echo $row['id']; ?>, '<?php echo htmlspecialchars($row['equipment']); ?>', <?php echo $row['qty']; ?>)" 
-                        class="w-full mt-3 inline-flex items-center justify-center px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-sm font-medium rounded-lg shadow-md hover:shadow-lg transition-all duration-200">
-                  <i data-feather="rotate-ccw" class="mr-2 w-4 h-4"></i>
-                  Request Return
-                </button>
-              <?php elseif ($row['return_approved'] == 1 && !$row['actual_return_date']): ?>
-                <div class="mt-3 p-3 bg-purple-50 border border-purple-200 rounded-lg text-xs text-purple-700">
-                  <i data-feather="info" class="w-4 h-4 inline mr-1"></i>
-                  <strong>Return approved!</strong> Please prepare the item for pickup by staff.
-                </div>
-              <?php elseif ($row['return_requested'] == 1 && !$row['actual_return_date']): ?>
-                <span class="text-xs text-gray-500 italic block mt-2">
-                  <i data-feather="clock" class="w-3 h-3 inline mr-1"></i>
-                  Return request pending staff approval
-                </span>
-              <?php endif; ?>
-            </div>
-          <?php endwhile; ?>
+    <?php if ($canRequestReturn): ?>
+  <?php 
+    $actuallyIsGroup = ($row['borrowing_type'] == 'group' && !empty($row['group_request_id']));
+    $safeGroupId = $actuallyIsGroup ? $row['group_request_id'] : '';
+  ?>
+  <button onclick="openReturnModal('<?php echo $safeGroupId; ?>', <?php echo intval($row['id']); ?>, '<?php echo htmlspecialchars($row['equipment_names']); ?>', <?php echo intval($row['total_qty']); ?>, <?php echo $actuallyIsGroup ? 'true' : 'false'; ?>)" 
+          class="w-full mt-3 inline-flex items-center justify-center px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-sm font-medium rounded-lg shadow-md hover:shadow-lg transition-all duration-200">
+    <i data-feather="rotate-ccw" class="mr-2 w-4 h-4"></i>
+    Request Return <?php echo $actuallyIsGroup ? '(All ' . $row['item_count'] . ' Items)' : ''; ?>
+  </button>
+<?php elseif ($row['return_approved'] == 1 && !$row['actual_return_date']): ?>
+  <div class="mt-3 p-3 bg-purple-50 border border-purple-200 rounded-lg text-xs text-purple-700">
+    <i data-feather="info" class="w-4 h-4 inline mr-1"></i>
+    <strong>Return approved!</strong> Please prepare <?php echo $actuallyIsGroup ? 'all items' : 'the item'; ?> for pickup by staff.
+  </div>
+<?php elseif ($row['return_requested'] == 1 && !$row['actual_return_date']): ?>
+  <span class="text-xs text-gray-500 italic block mt-2">
+    <i data-feather="clock" class="w-3 h-3 inline mr-1"></i>
+    Return request pending staff approval
+  </span>
+<?php endif; ?>
+  </div>
+<?php endwhile; ?>
         <?php else: ?>
           <div class="px-6 py-12 text-center">
             <div class="flex flex-col items-center justify-center">
@@ -335,110 +456,134 @@ function getBorrowStatus($row) {
             <?php $result->data_seek(0); ?>
             <?php if ($result->num_rows > 0): ?>
               <?php while ($row = $result->fetch_assoc()): 
-                $status = getBorrowStatus($row);
-                $canRequestReturn = $row['actual_pickup_date'] && !$row['actual_return_date'] && $row['return_requested'] == 0;
-                $isOverdue = !$row['actual_return_date'] && strtotime($row['expected_return_date']) < time();
-              ?>
-                <tr class="hover:bg-blue-50 transition duration-150 ease-in-out">
-                  <td class="px-6 py-4">
-                    <div class="flex items-center">
-                      <div class="flex-shrink-0 h-12 w-12 rounded-lg overflow-hidden bg-gray-100 border border-gray-200">
-                        <?php if (!empty($row['equipment_image'])): ?>
-                          <img src="../photos/<?php echo htmlspecialchars($row['equipment_image']); ?>" 
-                              alt="<?php echo htmlspecialchars($row['equipment']); ?>" 
-                              class="h-full w-full object-cover"
-                              onerror="this.parentElement.innerHTML='<div class=\'h-full w-full flex items-center justify-center bg-blue-100\'><i data-feather=\'package\' class=\'text-blue-600 w-6 h-6\'></i></div>'; feather.replace();">
-                        <?php else: ?>
-                          <div class="h-full w-full flex items-center justify-center bg-blue-100">
-                            <i data-feather="package" class="text-blue-600 w-6 h-6"></i>
-                          </div>
-                        <?php endif; ?>
-                      </div>
-                      <div class="ml-4">
-                        <div class="text-sm font-semibold text-gray-900"><?php echo htmlspecialchars($row['equipment']); ?></div>
-                        <?php if ($row['condition_notes']): ?>
-                          <div class="text-xs text-gray-500 mt-1">Condition: <?php echo htmlspecialchars($row['condition_notes']); ?></div>
-                        <?php endif; ?>
-                        <?php if ($row['is_damaged'] == 1): ?>
-                          <div class="text-xs text-red-600 font-semibold mt-1">
-                            <i data-feather="alert-triangle" class="w-3 h-3 inline mr-1"></i>
-                            Damage Fee: ₱<?php echo number_format($row['damage_fee'], 2); ?>
-                          </div>
-                        <?php endif; ?>
-                      </div>
-                    </div>
-                  </td>
-                  <td class="px-6 py-4">
-                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-gray-100 text-gray-800">
-                      <?php echo $row['qty']; ?>
-                    </span>
-                  </td>
-                  <td class="px-6 py-4 text-sm">
-                    <div class="space-y-1">
-                      <div class="flex items-center text-gray-700">
-                        <i data-feather="calendar" class="w-3 h-3 mr-2 text-gray-500"></i>
-                        <strong>Borrowed:</strong>&nbsp;<?php echo date("M d, Y", strtotime($row['borrow_date'])); ?>
-                      </div>
-                      <?php if ($row['actual_pickup_date']): ?>
-                        <div class="flex items-center text-gray-700">
-                          <i data-feather="truck" class="w-3 h-3 mr-2 text-gray-500"></i>
-                          <strong>Delivered:</strong>&nbsp;<?php echo date("M d, Y", strtotime($row['actual_pickup_date'])); ?>
-                        </div>
-                      <?php endif; ?>
-                      <div class="flex items-center <?php echo $isOverdue ? 'text-red-600 font-semibold' : 'text-gray-700'; ?>">
-                        <i data-feather="calendar" class="w-3 h-3 mr-2"></i>
-                        <strong>Due:</strong>&nbsp;<?php echo date("M d, Y", strtotime($row['expected_return_date'])); ?>
-                        <?php if ($isOverdue): ?>
-                          <span class="ml-2 text-xs">(Overdue)</span>
-                        <?php endif; ?>
-                      </div>
-                      <?php if ($row['actual_return_date']): ?>
-                        <div class="flex items-center text-green-700">
-                          <i data-feather="check-circle" class="w-3 h-3 mr-2"></i>
-                          <strong>Returned:</strong>&nbsp;<?php echo date("M d, Y", strtotime($row['actual_return_date'])); ?>
-                        </div>
-                      <?php endif; ?>
-                    </div>
-                  </td>
-                  <td class="px-6 py-4">
-                    <span class="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-semibold border <?php echo $status['bg'] . ' ' . $status['text'] . ' ' . $status['border']; ?>">
-                      <i data-feather="<?php echo $status['icon']; ?>" class="w-4 h-4 mr-1.5"></i>
-                      <?php echo $status['label']; ?>
-                    </span>
-                    <?php if ($isOverdue && !$row['actual_return_date']): ?>
-                      <div class="mt-1">
-                        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-300">
-                          <i data-feather="alert-triangle" class="w-3 h-3 mr-1"></i>
-                          Overdue
-                        </span>
-                      </div>
-                    <?php endif; ?>
-                  </td>
-                  <td class="px-6 py-4">
-                    <?php if ($canRequestReturn): ?>
-                      <button onclick="openReturnModal(<?php echo $row['id']; ?>, '<?php echo htmlspecialchars($row['equipment']); ?>', <?php echo $row['qty']; ?>)" 
-                              class="inline-flex items-center px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-sm font-medium rounded-lg shadow-md hover:shadow-lg transition-all duration-200 transform hover:-translate-y-0.5">
-                        <i data-feather="rotate-ccw" class="mr-2 w-4 h-4"></i>
-                        Request Return
-                      </button>
-                    <?php elseif ($row['return_approved'] == 1 && !$row['actual_return_date']): ?>
-                      <div class="text-sm">
-                        <span class="inline-flex items-center px-3 py-1.5 rounded-lg bg-purple-100 text-purple-700 font-medium">
-                          <i data-feather="package" class="w-4 h-4 mr-1.5"></i>
-                          Prepare for Pickup
-                        </span>
-                      </div>
-                    <?php elseif ($row['return_requested'] == 1 && !$row['actual_return_date']): ?>
-                      <span class="text-sm text-gray-500 italic">
-                        <i data-feather="clock" class="w-4 h-4 inline mr-1"></i>
-                        Pending approval
-                      </span>
-                    <?php else: ?>
-                      <span class="text-sm text-gray-400">-</span>
-                    <?php endif; ?>
-                  </td>
-                </tr>
-              <?php endwhile; ?>
+  $status = getBorrowStatus($row);
+  $is_group = $row['borrowing_type'] == 'group';
+  $equipment_images = !empty($row['equipment_images']) ? explode(',', $row['equipment_images']) : [];
+  $first_image = !empty($equipment_images) ? $equipment_images[0] : '';
+  $canRequestReturn = $row['actual_pickup_date'] && !$row['actual_return_date'] && $row['return_requested'] == 0;
+  $isOverdue = !$row['actual_return_date'] && strtotime($row['expected_return_date']) < time();
+?>
+  <tr class="hover:bg-blue-50 transition duration-150 ease-in-out">
+    <td class="px-6 py-4">
+      <div class="flex items-center">
+        <div class="flex-shrink-0 h-12 w-12 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 relative">
+          <?php if (!empty($first_image)): ?>
+            <img src="../photos/<?php echo htmlspecialchars($first_image); ?>" 
+                alt="Equipment" 
+                class="h-full w-full object-cover"
+                onerror="this.parentElement.innerHTML='<div class=\'h-full w-full flex items-center justify-center bg-blue-100\'><i data-feather=\'package\' class=\'text-blue-600 w-6 h-6\'></i></div>'; feather.replace();">
+          <?php else: ?>
+            <div class="h-full w-full flex items-center justify-center bg-blue-100">
+              <i data-feather="package" class="text-blue-600 w-6 h-6"></i>
+            </div>
+          <?php endif; ?>
+          <?php if ($is_group): ?>
+            <div class="absolute -top-1 -right-1 bg-purple-600 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center shadow-lg">
+              <?php echo $row['item_count']; ?>
+            </div>
+          <?php endif; ?>
+        </div>
+        <div class="ml-4">
+          <?php if ($is_group): ?>
+            <div class="flex items-center gap-2 mb-1">
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-700 border border-purple-300">
+                <i data-feather="layers" class="w-3 h-3 mr-1"></i>
+                Group
+              </span>
+            </div>
+            <div class="text-sm font-semibold text-gray-900 mb-1"><?php echo $row['item_count']; ?> Items</div>
+            <div class="text-xs text-gray-600 max-w-xs"><?php echo htmlspecialchars($row['equipment_names']); ?></div>
+          <?php else: ?>
+            <div class="text-sm font-semibold text-gray-900"><?php echo htmlspecialchars($row['equipment_names']); ?></div>
+          <?php endif; ?>
+          
+          <?php if ($row['all_condition_notes']): ?>
+            <div class="text-xs text-gray-500 mt-1">Condition: <?php echo htmlspecialchars($row['all_condition_notes']); ?></div>
+          <?php endif; ?>
+          <?php if ($row['has_damage'] == 1): ?>
+            <div class="text-xs text-red-600 font-semibold mt-1">
+              <i data-feather="alert-triangle" class="w-3 h-3 inline mr-1"></i>
+              Total Damage Fee: ₱<?php echo number_format($row['total_damage_fee'], 2); ?>
+            </div>
+          <?php endif; ?>
+        </div>
+      </div>
+    </td>
+    <td class="px-6 py-4">
+      <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-gray-100 text-gray-800">
+        <?php echo $row['total_qty']; ?>
+      </span>
+    </td>
+    <td class="px-6 py-4 text-sm">
+      <div class="space-y-1">
+        <div class="flex items-center text-gray-700">
+          <i data-feather="calendar" class="w-3 h-3 mr-2 text-gray-500"></i>
+          <strong>Borrowed:</strong>&nbsp;<?php echo date("M d, Y", strtotime($row['borrow_date'])); ?>
+        </div>
+        <?php if ($row['actual_pickup_date']): ?>
+          <div class="flex items-center text-gray-700">
+            <i data-feather="truck" class="w-3 h-3 mr-2 text-gray-500"></i>
+            <strong>Delivered:</strong>&nbsp;<?php echo date("M d, Y", strtotime($row['actual_pickup_date'])); ?>
+          </div>
+        <?php endif; ?>
+        <div class="flex items-center <?php echo $isOverdue ? 'text-red-600 font-semibold' : 'text-gray-700'; ?>">
+          <i data-feather="calendar" class="w-3 h-3 mr-2"></i>
+          <strong>Due:</strong>&nbsp;<?php echo date("M d, Y", strtotime($row['expected_return_date'])); ?>
+          <?php if ($isOverdue): ?>
+            <span class="ml-2 text-xs">(Overdue)</span>
+          <?php endif; ?>
+        </div>
+        <?php if ($row['actual_return_date']): ?>
+          <div class="flex items-center text-green-700">
+            <i data-feather="check-circle" class="w-3 h-3 mr-2"></i>
+            <strong>Returned:</strong>&nbsp;<?php echo date("M d, Y", strtotime($row['actual_return_date'])); ?>
+          </div>
+        <?php endif; ?>
+      </div>
+    </td>
+    <td class="px-6 py-4">
+      <span class="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-semibold border <?php echo $status['bg'] . ' ' . $status['text'] . ' ' . $status['border']; ?>">
+        <i data-feather="<?php echo $status['icon']; ?>" class="w-4 h-4 mr-1.5"></i>
+        <?php echo $status['label']; ?>
+      </span>
+      <?php if ($isOverdue && !$row['actual_return_date']): ?>
+        <div class="mt-1">
+          <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-300">
+            <i data-feather="alert-triangle" class="w-3 h-3 mr-1"></i>
+            Overdue
+          </span>
+        </div>
+      <?php endif; ?>
+    </td>
+    <td class="px-6 py-4">
+      <?php if ($canRequestReturn): ?>
+  <?php 
+    $actuallyIsGroup = ($row['borrowing_type'] == 'group' && !empty($row['group_request_id']));
+    $safeGroupId = $actuallyIsGroup ? $row['group_request_id'] : '';
+  ?>
+  <button onclick="openReturnModal('<?php echo $safeGroupId; ?>', <?php echo intval($row['id']); ?>, '<?php echo htmlspecialchars($row['equipment_names']); ?>', <?php echo intval($row['total_qty']); ?>, <?php echo $actuallyIsGroup ? 'true' : 'false'; ?>)" 
+          class="inline-flex items-center px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-sm font-medium rounded-lg shadow-md hover:shadow-lg transition-all duration-200 transform hover:-translate-y-0.5">
+    <i data-feather="rotate-ccw" class="mr-2 w-4 h-4"></i>
+    Request Return<?php echo $actuallyIsGroup ? ' (All ' . $row['item_count'] . ')' : ''; ?>
+  </button>
+<?php elseif ($row['return_approved'] == 1 && !$row['actual_return_date']): ?>
+  <div class="text-sm">
+    <span class="inline-flex items-center px-3 py-1.5 rounded-lg bg-purple-100 text-purple-700 font-medium">
+      <i data-feather="package" class="w-4 h-4 mr-1.5"></i>
+      Prepare for Pickup
+    </span>
+  </div>
+<?php elseif ($row['return_requested'] == 1 && !$row['actual_return_date']): ?>
+  <span class="text-sm text-gray-500 italic">
+    <i data-feather="clock" class="w-4 h-4 inline mr-1"></i>
+    Pending approval
+  </span>
+<?php else: ?>
+  <span class="text-sm text-gray-400">-</span>
+<?php endif; ?>
+    </td>
+  </tr>
+<?php endwhile; ?>
             <?php else: ?>
               <tr>
                 <td colspan="5" class="px-6 py-12 text-center">
@@ -573,31 +718,37 @@ function getBorrowStatus($row) {
       </div>
       
       <form method="POST" id="returnForm">
-        <input type="hidden" name="borrow_id" id="modalBorrowId">
-        <div class="flex gap-3">
-          <button type="button" onclick="closeReturnModal()" 
-                  class="flex-1 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition duration-200">
-            Cancel
-          </button>
-          <button type="submit" name="request_return" 
-                  class="flex-1 px-4 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-medium rounded-lg shadow-md hover:shadow-lg transition-all duration-200">
-            Confirm Return
-          </button>
-        </div>
-      </form>
+  <input type="hidden" name="group_request_id" id="modalGroupRequestId">
+  <input type="hidden" name="borrow_id" id="modalBorrowId">
+  <input type="hidden" name="is_group" id="modalIsGroup">
+  <div class="flex gap-3">
+    <button type="button" onclick="closeReturnModal()" 
+            class="flex-1 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition duration-200">
+      Cancel
+    </button>
+    <button type="submit" name="request_return" 
+            class="flex-1 px-4 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-medium rounded-lg shadow-md hover:shadow-lg transition-all duration-200">
+      Confirm Return
+    </button>
+  </div>
+</form>
     </div>
   </div>
 
   <script>
     feather.replace();
 
-    function openReturnModal(borrowId, equipmentName, quantity) {
-      document.getElementById('modalBorrowId').value = borrowId;
-      document.getElementById('modalEquipmentName').textContent = equipmentName;
-      document.getElementById('modalQuantity').textContent = quantity;
-      document.getElementById('returnModal').classList.add('active');
-      feather.replace();
-    }
+    function openReturnModal(groupRequestId, borrowId, equipmentName, quantity, isGroup) {
+  document.getElementById('modalGroupRequestId').value = groupRequestId || '';
+  document.getElementById('modalBorrowId').value = borrowId;
+  document.getElementById('modalIsGroup').value = isGroup ? '1' : '0';
+  document.getElementById('modalEquipmentName').textContent = equipmentName;
+  document.getElementById('modalQuantity').textContent = quantity;
+   
+  
+  document.getElementById('returnModal').classList.add('active');
+  feather.replace();
+}
 
     function closeReturnModal() {
       document.getElementById('returnModal').classList.remove('active');

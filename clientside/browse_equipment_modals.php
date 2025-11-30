@@ -1,10 +1,56 @@
 <?php
 // ============================================
-// ALL MODALS - REQUEST, CONFIRMATION, IMAGE, SUCCESS, ERROR, PROFILE INCOMPLETE
-// Variables available: $result (mysqli_result), $msg
+// MODALS - UPDATED WITH PRIORITY VISUAL FEEDBACK
+// Add this CSS to the modals file for priority indication
 // ============================================
+?>
+<style>
+/* Priority Request Styling */
+.priority-request-badge {
+  background: linear-gradient(135deg, #9333ea 0%, #7c3aed 100%);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 4px 12px rgba(147, 51, 234, 0.3);
+  animation: priorityPulse 2s ease-in-out infinite;
+}
 
-// Reset result pointer to loop again for modals
+@keyframes priorityPulse {
+  0%, 100% { 
+    box-shadow: 0 4px 12px rgba(147, 51, 234, 0.3);
+    transform: scale(1);
+  }
+  50% { 
+    box-shadow: 0 6px 20px rgba(147, 51, 234, 0.5);
+    transform: scale(1.02);
+  }
+}
+
+.priority-notification {
+  background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%);
+  border-left: 4px solid #9333ea;
+  padding: 16px;
+  border-radius: 12px;
+  margin-top: 16px;
+}
+
+.priority-icon {
+  animation: priorityBounce 1.5s ease-in-out infinite;
+}
+
+@keyframes priorityBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+</style>
+
+<?php
+// Reset result pointer to loop through equipment
 $result->data_seek(0);
 
 while ($row = $result->fetch_assoc()):
@@ -12,6 +58,7 @@ while ($row = $result->fetch_assoc()):
 
 <!-- ============================================ -->
 <!-- REQUEST MODAL FOR EQUIPMENT ID: <?php echo $row['id']; ?> -->
+<!-- WITH PRIORITY NOTIFICATION -->
 <!-- ============================================ -->
 <div id="requestModal<?php echo $row['id']; ?>" 
      class="modal-backdrop fixed inset-0 bg-black/60 items-center justify-center p-0 sm:p-4" style="display: none;">
@@ -63,16 +110,17 @@ while ($row = $result->fetch_assoc()):
 
           <!-- Quantity -->
           <div class="mt-4">
-           <input type="number" 
-       id="quantity_<?php echo $row['id']; ?>" 
-       name="quantity" 
-       min="1" 
-       max="<?php echo $row['quantity']; ?>"
-       step="1"
-       value="1" 
-       required
-       oninput="this.value = this.value.replace(/[^0-9]/g, ''); checkAvailabilityRealtime(<?php echo $row['id']; ?>)"
-       class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"> </div>
+            <input type="number" 
+                   id="quantity_<?php echo $row['id']; ?>" 
+                   name="quantity" 
+                   min="1" 
+                   max="<?php echo $row['quantity']; ?>"
+                   step="1"
+                   value="1" 
+                   required
+                   oninput="this.value = this.value.replace(/[^0-9]/g, ''); checkAvailabilityRealtime(<?php echo $row['id']; ?>)"
+                   class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition">
+          </div>
         </div>
       </div>
 
@@ -145,6 +193,19 @@ while ($row = $result->fetch_assoc()):
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
               </svg>
               <span class="text-sm text-green-700 font-medium">Certificate uploaded successfully</span>
+            </div>
+          </div>
+          
+          <!-- NEW: Priority Notification -->
+          <div class="priority-notification">
+            <div class="flex items-start gap-3">
+              <svg class="w-6 h-6 text-purple-600 flex-shrink-0 priority-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+              </svg>
+              <div>
+                <p class="text-sm font-semibold text-purple-900 mb-1">⚡ Priority Request</p>
+                <p class="text-xs text-purple-700">Your funeral request will be prioritized and reviewed first by the barangay staff.</p>
+              </div>
             </div>
           </div>
           
@@ -367,3 +428,338 @@ while ($row = $result->fetch_assoc()):
     </button>
   </div>
 </div>
+
+
+<<!-- ============================================ -->
+<!-- FLOATING ACTION CARD -->
+<!-- ============================================ -->
+<div id="floatingActionCard" class="hidden fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 animate-bounce-in">
+  <div class="bg-white rounded-2xl shadow-2xl border-2 border-blue-500 px-6 py-4 flex items-center gap-4">
+    <div class="flex items-center gap-3">
+      <div class="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
+        <span id="selectedCount" class="text-2xl font-bold text-blue-600">0</span>
+      </div>
+      <div>
+        <p class="text-sm text-gray-600">Items Selected</p>
+        <p class="text-xs text-gray-500">Ready to proceed</p>
+      </div>
+    </div>
+    
+    <div class="flex gap-2">
+      <button onclick="clearAllSelections()" 
+              class="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition font-medium">
+        Clear All
+      </button>
+      <button onclick="openQuantityModal()" 
+              class="px-6 py-2 text-sm bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 transition font-semibold shadow-sm">
+        Continue
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- QUANTITY CONFIRMATION MODAL -->
+<!-- ============================================ -->
+<div id="quantityConfirmModal" class="modal-backdrop fixed inset-0 bg-black/60 items-center justify-center p-4 hidden" style="z-index: 9999;">
+  <div class="bg-white w-full h-full sm:h-auto sm:rounded-2xl shadow-2xl sm:max-w-3xl sm:mx-auto modal-enter overflow-hidden flex flex-col" 
+       style="max-height: 100vh; sm:max-height: 90vh;">
+    
+    <!-- Header -->
+    <div class="bg-gradient-to-r from-blue-600 to-blue-700 p-6 text-white flex-shrink-0">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-2xl font-bold">Confirm Quantities</h2>
+          <p class="text-blue-100 text-sm mt-1">Set the quantity for each item</p>
+        </div>
+        <button onclick="closeQuantityModal()" 
+                class="text-white/80 hover:text-white text-3xl font-bold">&times;</button>
+      </div>
+    </div>
+
+    <!-- Content -->
+    <div id="quantityModalItems" class="p-6 overflow-y-auto flex-1 space-y-4">
+      <!-- Items will be populated dynamically -->
+    </div>
+
+    <!-- Footer -->
+    <div class="p-6 bg-gray-50 flex gap-3 flex-shrink-0 border-t-2 border-gray-100">
+      <button onclick="closeQuantityModal()"
+              class="flex-1 bg-white border-2 border-gray-300 text-gray-700 py-3 text-sm sm:text-base rounded-xl hover:bg-gray-50 transition font-semibold">
+        Cancel
+      </button>
+      <button onclick="proceedToDateSelection()"
+              class="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 text-white py-3 text-sm sm:text-base rounded-xl hover:from-blue-700 hover:to-blue-800 transition font-semibold shadow-sm">
+        Continue
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- GROUP REQUEST MODAL (Date Selection) -->
+<!-- ============================================ -->
+<div id="groupRequestModal" class="modal-backdrop fixed inset-0 bg-black/60 items-center justify-center p-4 hidden" style="z-index: 9999;">
+  <div class="bg-white w-full h-full sm:h-auto sm:rounded-2xl shadow-2xl sm:max-w-5xl sm:mx-auto modal-enter flex flex-col overflow-hidden"
+       style="max-height: 100vh; sm:max-height: 90vh;">
+
+    <!-- Mobile Header -->
+    <div class="flex items-center justify-between p-4 border-b sm:hidden bg-white sticky top-0 z-10">
+      <h2 class="text-lg font-bold">Group Request</h2>
+      <button onclick="closeGroupRequestModal()" 
+              class="text-gray-400 hover:text-gray-600 text-2xl font-bold">&times;</button>
+    </div>
+
+    <!-- Desktop Close Button -->
+    <button onclick="closeGroupRequestModal()" 
+            class="hidden sm:block absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-3xl font-bold z-10">&times;</button>
+
+    <div class="flex flex-col md:flex-row w-full overflow-y-auto flex-1">
+
+      <!-- LEFT SIDE - Selected Items Review -->
+      <div class="md:w-1/2 bg-gradient-to-br from-gray-50 to-blue-50 p-6 overflow-y-auto">
+        <h3 class="text-xl font-bold mb-4 text-gray-900">Selected Equipment</h3>
+        <div id="groupRequestReview" class="space-y-3">
+          <!-- Items will be populated dynamically -->
+        </div>
+      </div>
+
+      <!-- RIGHT SIDE - Form -->
+      <div class="md:w-1/2 p-6 flex flex-col gap-5 bg-white overflow-y-auto">
+
+        <!-- Purpose Dropdown -->
+        <div>
+          <label class="text-sm font-semibold block mb-2 text-gray-700">Purpose <span class="text-red-500">*</span></label>
+          <select id="group_purpose" 
+                  onchange="toggleGroupDeathCertificateField()"
+                  class="w-full px-4 py-3 text-sm border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" required>
+            <option value="">Select purpose...</option>
+            <option value="Birthday Party">Birthday Party</option>
+            <option value="Wedding">Wedding</option>
+            <option value="Anniversary">Anniversary</option>
+            <option value="Seminar">Seminar</option>
+            <option value="Workshop">Workshop</option>
+            <option value="Community Event">Community Event</option>
+            <option value="Funeral/Lamay">Funeral/Lamay</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+
+        <!-- Death Certificate Upload for Group Request (Hidden by default) -->
+        <div id="group_death_certificate_container" style="display: none;">
+          <label class="text-sm font-semibold block mb-2 text-gray-700">Death Certificate <span class="text-red-500">*</span></label>
+          <p class="text-gray-500 text-xs mb-2">Please upload or capture a photo of the death certificate as proof</p>
+          
+          <!-- File Input (Desktop) -->
+          <input type="file" 
+                 id="group_death_certificate_file" 
+                 accept="image/jpeg,image/jpg,image/png"
+                 onchange="handleGroupDeathCertificateUpload(this)"
+                 class="hidden">
+          
+          <!-- Camera Input (Mobile) -->
+          <input type="file" 
+                 id="group_death_certificate_camera" 
+                 accept="image/*" 
+                 capture="environment"
+                 onchange="handleGroupDeathCertificateUpload(this)"
+                 class="hidden">
+          
+          <!-- Upload Buttons -->
+          <div class="flex gap-2">
+            <button type="button" 
+                    onclick="document.getElementById('group_death_certificate_file').click()"
+                    class="flex-1 bg-white border-2 border-gray-300 text-gray-700 py-3 px-4 text-sm rounded-xl hover:bg-gray-50 transition font-semibold flex items-center justify-center gap-2">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+              </svg>
+              Upload File
+            </button>
+            <button type="button" 
+                    onclick="document.getElementById('group_death_certificate_camera').click()"
+                    class="flex-1 bg-white border-2 border-gray-300 text-gray-700 py-3 px-4 text-sm rounded-xl hover:bg-gray-50 transition font-semibold flex items-center justify-center gap-2 md:hidden">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
+              </svg>
+              Capture Photo
+            </button>
+          </div>
+          
+          <!-- Upload Status/Preview -->
+          <div id="group_death_certificate_status" class="mt-3 hidden">
+            <div class="bg-green-50 border border-green-200 rounded-xl p-3 flex items-center gap-3">
+              <svg class="w-5 h-5 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+              </svg>
+              <div class="flex-1">
+                <span class="text-sm text-green-700 font-medium">Certificate uploaded successfully</span>
+                <p class="text-xs text-green-600 mt-1">✓ Your request will be prioritized</p>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Priority Notification -->
+          <div class="priority-notification">
+            <div class="flex items-start gap-3">
+              <svg class="w-6 h-6 text-purple-600 flex-shrink-0 priority-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+              </svg>
+              <div>
+                <p class="text-sm font-semibold text-purple-900 mb-1">⚡ Priority Request</p>
+                <p class="text-xs text-purple-700">Your funeral request will be prioritized and reviewed first by the barangay staff.</p>
+              </div>
+            </div>
+          </div>
+          
+          <input type="hidden" id="group_death_certificate_filename" value="">
+        </div>
+
+        <div>
+          <label class="text-sm font-semibold block mb-2 text-gray-700">Borrow Date & Time</label>
+          <p class="text-gray-500 text-xs mb-2">When you'll pick up the equipment</p>
+          <input type="text" id="group_borrow_datetime"
+                 class="w-full px-4 py-3 text-sm border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" 
+                 placeholder="Select date & time" required>
+        </div>
+
+        <div>
+          <label class="text-sm font-semibold block mb-2 text-gray-700">Return Date & Time</label>
+          <p class="text-gray-500 text-xs mb-2">When you'll return the equipment</p>
+          <input type="text" id="group_return_datetime"
+                 class="w-full px-4 py-3 text-sm border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" 
+                 placeholder="Select date & time" required>
+        </div>
+
+        <div>
+          <label class="text-sm font-semibold block mb-2 text-gray-700">Description (Optional)</label>
+          <textarea id="group_description" rows="4" placeholder="Add any notes or special requests..."
+                    class="w-full px-4 py-3 text-sm border-2 border-gray-200 rounded-xl resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"></textarea>
+        </div>
+
+        <label class="flex items-start gap-3 text-sm cursor-pointer p-4 bg-gray-50 rounded-xl border-2 border-gray-200 hover:border-blue-300 transition">
+          <input type="checkbox" id="groupAgreeCheckbox" onchange="toggleGroupSubmitButton()"
+                 class="mt-0.5 w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500">
+          <span class="text-gray-700">I agree to return all items in good condition and on time.</span>
+        </label>
+
+        <button type="button"
+                id="groupSubmitBtn"
+                class="w-full bg-gray-300 text-gray-500 py-3.5 text-sm sm:text-base rounded-xl cursor-not-allowed transition font-semibold mt-auto"
+                onclick="if(!this.disabled) submitGroupRequest()"
+                disabled>
+          Submit Group Request
+        </button>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+@keyframes bounce-in {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 20px);
+  }
+  50% {
+    transform: translate(-50%, -5px);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.animate-bounce-in {
+  animation: bounce-in 0.5s ease-out;
+}
+
+/* Update equipment card selection state */
+.equipment-card.ring-2 {
+  position: relative;
+}
+
+.equipment-card.ring-2::before {
+  content: "✓ Selected";
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: #2563eb;
+  color: white;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  z-index: 5;
+}
+
+/* CRITICAL: Validation modal must be above group request modal */
+#validationModal {
+  z-index: 99999 !important;
+}
+
+/* Priority Request Styling */
+.priority-request-badge {
+  background: linear-gradient(135deg, #9333ea 0%, #7c3aed 100%);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 4px 12px rgba(147, 51, 234, 0.3);
+  animation: priorityPulse 2s ease-in-out infinite;
+}
+
+@keyframes priorityPulse {
+  0%, 100% { 
+    box-shadow: 0 4px 12px rgba(147, 51, 234, 0.3);
+    transform: scale(1);
+  }
+  50% { 
+    box-shadow: 0 6px 20px rgba(147, 51, 234, 0.5);
+    transform: scale(1.02);
+  }
+}
+
+.priority-notification {
+  background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%);
+  border-left: 4px solid #9333ea;
+  padding: 16px;
+  border-radius: 12px;
+  margin-top: 16px;
+}
+
+.priority-icon {
+  animation: priorityBounce 1.5s ease-in-out infinite;
+}
+
+@keyframes priorityBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+</style>
+
+<script>
+// Toggle group submit button based on agreement checkbox
+function toggleGroupSubmitButton() {
+  const checkbox = document.getElementById('groupAgreeCheckbox');
+  const button = document.getElementById('groupSubmitBtn');
+
+  if (!checkbox || !button) return;
+
+  if (checkbox.checked) {
+    button.disabled = false;
+    button.classList.remove('bg-gray-300', 'text-gray-500', 'cursor-not-allowed');
+    button.classList.add('bg-gradient-to-r', 'from-blue-600', 'to-blue-700', 'text-white', 'hover:from-blue-700', 'hover:to-blue-800', 'shadow-sm');
+  } else {
+    button.disabled = true;
+    button.classList.add('bg-gray-300', 'text-gray-500', 'cursor-not-allowed');
+    button.classList.remove('bg-gradient-to-r', 'from-blue-600', 'to-blue-700', 'text-white', 'hover:from-blue-700', 'hover:to-blue-800', 'shadow-sm');
+  }
+}
+</script>

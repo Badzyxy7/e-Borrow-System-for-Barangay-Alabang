@@ -1,6 +1,6 @@
 <?php
 // ============================================
-// BROWSE EQUIPMENT - MAIN FILE (LOGIC + LAYOUT) - UPDATED
+// BROWSE EQUIPMENT - MAIN FILE (LOGIC + LAYOUT) - FIXED
 // ============================================
 
 error_reporting(E_ALL);
@@ -31,6 +31,41 @@ if (isset($_POST['request'])) {
     $description = isset($_POST['description']) ? $conn->real_escape_string($_POST['description']) : '';
     $purpose = isset($_POST['purpose']) ? $conn->real_escape_string($_POST['purpose']) : '';
     $death_certificate = isset($_POST['death_certificate']) ? $conn->real_escape_string($_POST['death_certificate']) : '';
+    // AUTO-SET PRIORITY FOR FUNERAL
+// AUTO-SET PRIORITY FOR FUNERAL
+$priority = 0; // Default priority
+
+// DEBUG: Log received values
+error_log("=== BORROW REQUEST DEBUG ===");
+error_log("Purpose received: [" . $purpose . "]");
+error_log("Purpose length: " . strlen($purpose));
+error_log("Death certificate: [" . $death_certificate . "]");
+error_log("Death cert length: " . strlen($death_certificate));
+
+// Trim values to remove whitespace
+$purpose = trim($purpose);
+$death_certificate = trim($death_certificate);
+
+error_log("Purpose after trim: [" . $purpose . "]");
+error_log("Death cert after trim: [" . $death_certificate . "]");
+
+// Check if purpose matches
+if (strcasecmp($purpose, 'Funeral/Lamay') === 0) {
+    error_log("Purpose matches Funeral/Lamay!");
+    if (!empty($death_certificate)) {
+        error_log("Death certificate is not empty - Setting priority to 1");
+        $priority = 1;
+    } else {
+        error_log("Death certificate is EMPTY - Priority stays 0");
+    }
+} else {
+    error_log("Purpose does NOT match. Comparison failed.");
+}
+
+error_log("Final priority value: " . $priority);
+if ($purpose === 'Funeral/Lamay' && !empty($death_certificate)) {
+    $priority = 1; // High priority for funeral with certificate
+}
 
     $now = date('Y-m-d H:i');
     // ========== ADD QUANTITY VALIDATION ==========
@@ -74,9 +109,16 @@ if (isset($_POST['request'])) {
         $available_qty = $total_qty - $total_borrowed;
         
         if ($available_qty >= $qty) {
-            $conn->query("INSERT INTO borrow_requests (user_id, equipment_id, qty, borrow_date, return_date, description, purpose, death_certificate, status, created_at)
-                          VALUES ($user_id, $equipment_id, $qty, '$borrow_datetime', '$return_datetime', '$description', '$purpose', '$death_certificate', 'pending', NOW())");
-            $msg = "Request submitted successfully!";
+        $conn->query("INSERT INTO borrow_requests 
+    (user_id, equipment_id, qty, borrow_date, return_date, description, purpose, death_certificate, priority, status, created_at)
+    VALUES 
+    ($user_id, $equipment_id, $qty, '$borrow_datetime', '$return_datetime', '$description', '$purpose', '$death_certificate', $priority, 'pending', NOW())");
+// Different success message for priority requests
+          if ($priority == 1) {
+              $msg = "Request submitted successfully! ⚡ Your funeral request has been prioritized and will be reviewed first.";
+          } else {
+              $msg = "Request submitted successfully!";
+          }
             $msg_type = 'success';
         } else {
             if ($available_qty > 0) {
@@ -85,6 +127,117 @@ if (isset($_POST['request'])) {
                 $msg = "Sorry! '$equipment_name' is fully booked for the selected dates. Please choose different dates.";
             }
             $msg_type = 'error';
+        }
+    }
+}
+
+// GROUP REQUEST HANDLING
+if (isset($_POST['group_request_data'])) {
+    $group_data = json_decode($_POST['group_request_data'], true);
+    
+    if (!$group_data) {
+        $msg = "Invalid group request data.";
+        $msg_type = 'error';
+    } else {
+        $items = $group_data['items'];
+        $borrow_date = $conn->real_escape_string($group_data['borrow_date']);
+        $return_date = $conn->real_escape_string($group_data['return_date']);
+        $purpose = $conn->real_escape_string($group_data['purpose']);
+        $description = isset($group_data['description']) ? $conn->real_escape_string($group_data['description']) : '';
+        $death_certificate = isset($group_data['death_certificate']) ? $conn->real_escape_string($group_data['death_certificate']) : '';
+        $priority = isset($group_data['priority']) ? intval($group_data['priority']) : 0;
+        
+        // Validation
+        if (empty($items) || empty($borrow_date) || empty($return_date) || empty($purpose)) {
+            $msg = "All required fields must be filled.";
+            $msg_type = 'error';
+        } elseif ($purpose === 'Funeral/Lamay' && empty($death_certificate)) {
+            $msg = "Death certificate is required for funeral/lamay purposes.";
+            $msg_type = 'error';
+        } else {
+            $borrow_datetime_obj = new DateTime($borrow_date);
+            $return_datetime_obj = new DateTime($return_date);
+            $now_obj = new DateTime();
+            
+            if ($borrow_datetime_obj < $now_obj) {
+                $msg = "Borrow date cannot be in the past.";
+                $msg_type = 'error';
+            } elseif ($return_datetime_obj <= $borrow_datetime_obj) {
+                $msg = "Return date must be after borrow date.";
+                $msg_type = 'error';
+            } else {
+                // Start transaction
+                $conn->begin_transaction();
+                
+                try {
+                    // Create a group request ID
+                    $group_request_id = time() . '_' . $user_id;
+                    
+                    // Validate and insert each item
+                    foreach ($items as $item) {
+                        $equipment_id = intval($item['id']);
+                        $qty = intval($item['quantity']);
+                        
+                        // Get equipment details
+                        $eq_result = $conn->query("SELECT quantity, name FROM equipment WHERE id = $equipment_id");
+                        if (!$eq_result || $eq_result->num_rows === 0) {
+                            throw new Exception("Equipment not found: " . $item['name']);
+                        }
+                        
+                        $equipment = $eq_result->fetch_assoc();
+                        $total_qty = $equipment['quantity'];
+                        $equipment_name = $equipment['name'];
+                        
+                        // Check availability
+                        $check_sql = "
+                            SELECT COALESCE(SUM(qty), 0) as total_borrowed
+                            FROM borrow_requests
+                            WHERE equipment_id = $equipment_id
+                              AND status IN ('pending', 'approved', 'picked_up')
+                              AND borrow_date <= '$return_date'
+                              AND return_date >= '$borrow_date'
+                        ";
+                        $check_result = $conn->query($check_sql);
+                        $row = $check_result->fetch_assoc();
+                        $total_borrowed = $row['total_borrowed'];
+                        
+                        $available_qty = $total_qty - $total_borrowed;
+                        
+                        if ($available_qty < $qty) {
+                            throw new Exception("Insufficient availability for '$equipment_name'. Available: $available_qty, Requested: $qty");
+                        }
+                        
+                        // Insert the request with priority and death certificate
+                        $insert_sql = "INSERT INTO borrow_requests 
+                            (user_id, equipment_id, qty, borrow_date, return_date, description, purpose, 
+                             death_certificate, priority, group_request_id, status, created_at)
+                            VALUES 
+                            ($user_id, $equipment_id, $qty, '$borrow_date', '$return_date', 
+                             '$description', '$purpose', '$death_certificate', $priority, '$group_request_id', 'pending', NOW())";
+                        
+                        if (!$conn->query($insert_sql)) {
+                            throw new Exception("Failed to insert request for '$equipment_name': " . $conn->error);
+                        }
+                    }
+                    
+                    // Commit transaction
+                    $conn->commit();
+                    
+                    // Success message with priority indication
+                    if ($priority == 1) {
+                        $msg = "Group request submitted successfully! ⚡ Your funeral request has been prioritized and will be reviewed first. Total items: " . count($items);
+                    } else {
+                        $msg = "Group request submitted successfully! Your request includes " . count($items) . " item(s).";
+                    }
+                    $msg_type = 'success';
+                    
+                } catch (Exception $e) {
+                    // Rollback on error
+                    $conn->rollback();
+                    $msg = $e->getMessage();
+                    $msg_type = 'error';
+                }
+            }
         }
     }
 }
@@ -138,9 +291,12 @@ $is_ajax = isset($_GET['ajax']) ||
 // AJAX RESPONSE (Cards + Pagination Only)
 // ============================================
 if ($is_ajax) {
+    ob_clean(); // Clear any buffered output
+    
+    // Include equipment cards
     include "browse_equipment_cards.php";
     
-    // AJAX Pagination
+    // AJAX Pagination (ONLY ONCE)
     if ($total_pages > 1) {
         echo '<div class="col-span-full mt-6 sm:mt-8 flex flex-wrap justify-center items-center gap-1 sm:gap-2">';
         
@@ -195,7 +351,7 @@ if ($is_ajax) {
               </div>';
     }
     
-    exit(); // Stop execution for AJAX
+    exit(); // CRITICAL: Stop execution for AJAX - no more output!
 }
 
 // ============================================
@@ -275,7 +431,124 @@ if ($is_ajax) {
       </div>
     <?php endif; ?>
 
-    <!-- SEARCH & FILTER FORM -->
+    <!-- Add this section right after the ALERT MESSAGES section in browseequipment.php -->
+
+
+
+<!-- SEARCH & FILTER FORM -->
+<form method="get" id="searchForm" class="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-6">
+  <!-- ... rest of your existing search form ... -->
+</form>
+
+<!-- 
+  UPDATE YOUR SCRIPT SECTION:
+  Add this to the end of your existing equipment_browse.js include
+-->
+
+<script>
+// Update the initialization function to include group request
+function initializeEquipmentBrowse() {
+  console.log('Initializing Equipment Browse...');
+  
+  // Initialize Feather icons
+  if (typeof feather !== 'undefined') {
+    feather.replace();
+  }
+  
+  // Initialize search filters
+  initializeSearchFilters();
+  
+  // Initialize modal backdrop handlers
+  initializeModalBackdropHandlers();
+  
+  // Initialize group request feature
+  initializeGroupRequestFeature();
+  
+  // Set current page from PHP
+  const pageParam = new URLSearchParams(window.location.search).get('page');
+  currentPage = pageParam ? parseInt(pageParam) : 1;
+  
+  console.log('Equipment Browse initialized successfully');
+}
+
+// Update toggleSelectMode to handle button visibility
+function toggleSelectMode() {
+  isSelectMode = !isSelectMode;
+  const selectBtn = document.getElementById('selectModeBtn');
+  const floatingCard = document.getElementById('floatingActionCard');
+  const cards = document.querySelectorAll('.equipment-card');
+  
+  if (isSelectMode) {
+    // Enter select mode
+    selectBtn.innerHTML = `
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+      </svg>
+      Cancel Selection
+    `;
+    selectBtn.classList.remove('from-blue-900', 'to-blue-700');
+    selectBtn.classList.add('from-gray-600', 'to-gray-700');
+    
+    // Show checkboxes on all available equipment cards
+    cards.forEach(card => {
+      const checkboxContainer = card.querySelector('.equipment-checkbox-container');
+      const requestBtn = card.querySelector('.individual-request-btn');
+      
+      if (checkboxContainer && requestBtn) {
+        // Only show checkbox for available items
+        checkboxContainer.classList.remove('hidden');
+        
+        // Hide individual request button in select mode
+        requestBtn.style.display = 'none';
+      }
+    });
+    
+    // Show floating action card if items selected
+    if (selectedItems.size > 0) {
+      floatingCard.classList.remove('hidden');
+    }
+  } else {
+    // Exit select mode
+    selectBtn.innerHTML = `
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+      </svg>
+      Select Equipment
+    `;
+    selectBtn.classList.add('from-blue-900', 'to-blue-700');
+    selectBtn.classList.remove('from-gray-600', 'to-gray-700');
+    
+    // Hide checkboxes and restore buttons
+    cards.forEach(card => {
+      const checkboxContainer = card.querySelector('.equipment-checkbox-container');
+      const checkbox = card.querySelector('.equipment-checkbox');
+      const requestBtn = card.querySelector('.individual-request-btn');
+      
+      if (checkboxContainer) {
+        checkboxContainer.classList.add('hidden');
+      }
+      
+      if (checkbox) {
+        checkbox.checked = false;
+      }
+      
+      if (requestBtn) {
+        requestBtn.style.display = 'block';
+      }
+      
+      // Remove selection styling
+      card.classList.remove('ring-2', 'ring-blue-500', 'bg-blue-50');
+    });
+    
+    // Clear selections and hide floating card
+    selectedItems.clear();
+    floatingCard.classList.add('hidden');
+    updateFloatingCard();
+  }
+}
+</script>
+
+    <!-- SEARCH & FILTER FORM WITH SELECT BUTTON -->
     <form method="get" id="searchForm" class="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-6">
       <input type="text" 
              name="search" 
@@ -293,84 +566,92 @@ if ($is_ajax) {
       <button type="submit" class="bg-gradient-to-r from-blue-900 to-blue-700 text-white px-6 py-3 text-sm sm:text-base rounded-xl hover:bg-blue-700 transition font-semibold shadow-sm">
         Filter
       </button>
+      
+      <!-- SELECT MODE BUTTON (Icon Only with Tooltip) -->
+      <div class="relative group">
+        <button type="button"
+                id="selectModeBtn" 
+                onclick="toggleSelectMode()"
+                class="bg-gradient-to-r from-blue-900 to-blue-700 text-white p-3 rounded-xl hover:from-blue-700 hover:to-blue-800 transition shadow-sm">
+          <svg id="selectModeIcon" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+          </svg>
+        </button>
+        <!-- Tooltip -->
+        <div class="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-1 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
+          <span id="selectModeTooltip">Select Equipment</span>
+          <div class="absolute top-full left-1/2 transform -translate-x-1/2 -mt-1 border-4 border-transparent border-t-gray-900"></div>
+        </div>
+      </div>
     </form>
 
     <!-- EQUIPMENT GRID -->
     <div id="resultsContainer" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
       <?php include "browse_equipment_cards.php"; ?>
-    </div>
-
-    <!-- PAGINATION -->
-    <?php if ($total_pages > 1): ?>
-    <div class="mt-8 flex flex-wrap justify-center items-center gap-2">
       
-      <?php if ($page > 1): ?>
-        <a href="?page=<?php echo ($page - 1); ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $status_filter ? '&status=' . urlencode($status_filter) : ''; ?>" 
-           class="px-4 py-2.5 text-sm bg-white border-2 border-gray-200 rounded-xl hover:bg-gray-50 hover:border-blue-300 transition text-gray-700 font-semibold">
-          « Prev
-        </a>
-      <?php else: ?>
-        <span class="px-4 py-2.5 text-sm bg-gray-100 border-2 border-gray-200 rounded-xl text-gray-400 font-semibold cursor-not-allowed">
-          « Prev
-        </span>
-      <?php endif; ?>
-
-      <?php
-      $start_page = max(1, $page - 1);
-      $end_page = min($total_pages, $page + 1);
-      
-      if ($start_page > 1): ?>
-        <a href="?page=1<?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $status_filter ? '&status=' . urlencode($status_filter) : ''; ?>" 
-           class="px-4 py-2.5 text-sm bg-white border-2 border-gray-200 rounded-xl hover:bg-gray-50 hover:border-blue-300 transition text-gray-700 font-medium">
-          1
-        </a>
-        <?php if ($start_page > 2): ?>
-          <span class="px-2 text-gray-400 text-sm">...</span>
-        <?php endif; ?>
-      <?php endif; ?>
-
-      <?php for ($i = $start_page; $i <= $end_page; $i++): ?>
-        <?php if ($i == $page): ?>
-          <span class="px-4 py-2.5 text-sm bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl font-bold shadow-sm">
-            <?php echo $i; ?>
-          </span>
-        <?php else: ?>
-          <a href="?page=<?php echo $i; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $status_filter ? '&status=' . urlencode($status_filter) : ''; ?>" 
-             class="px-4 py-2.5 text-sm bg-white border-2 border-gray-200 rounded-xl hover:bg-gray-50 hover:border-blue-300 transition text-gray-700 font-medium">
-            <?php echo $i; ?>
+      <!-- INITIAL PAGE LOAD PAGINATION (ONLY FOR NON-AJAX) -->
+      <?php if ($total_pages > 1): ?>
+      <div class="col-span-full mt-6 sm:mt-8 flex flex-wrap justify-center items-center gap-1 sm:gap-2">
+        
+        <?php if ($page > 1): ?>
+          <a href="#" onclick="goToPage(<?php echo ($page - 1); ?>); return false;" 
+             class="px-3 sm:px-4 py-2 text-xs sm:text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition text-gray-700 font-medium">
+            « Prev
           </a>
         <?php endif; ?>
-      <?php endfor; ?>
 
-      <?php if ($end_page < $total_pages): ?>
-        <?php if ($end_page < $total_pages - 1): ?>
-          <span class="px-2 text-gray-400 text-sm">...</span>
+        <?php
+        $start_page = max(1, $page - 1);
+        $end_page = min($total_pages, $page + 1);
+        
+        if ($start_page > 1): ?>
+          <a href="#" onclick="goToPage(1); return false;" 
+             class="px-3 sm:px-4 py-2 text-xs sm:text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition text-gray-700">1</a>
+          <?php if ($start_page > 2): ?>
+            <span class="px-2 text-gray-500 text-xs sm:text-sm">...</span>
+          <?php endif; ?>
         <?php endif; ?>
-        <a href="?page=<?php echo $total_pages; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $status_filter ? '&status=' . urlencode($status_filter) : ''; ?>" 
-           class="px-4 py-2.5 text-sm bg-white border-2 border-gray-200 rounded-xl hover:bg-gray-50 hover:border-blue-300 transition text-gray-700 font-medium">
-          <?php echo $total_pages; ?>
-        </a>
-      <?php endif; ?>
 
-      <?php if ($page < $total_pages): ?>
-        <a href="?page=<?php echo ($page + 1); ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $status_filter ? '&status=' . urlencode($status_filter) : ''; ?>" 
-           class="px-4 py-2.5 text-sm bg-white border-2 border-gray-200 rounded-xl hover:bg-gray-50 hover:border-blue-300 transition text-gray-700 font-semibold">
-          Next »
-        </a>
-      <?php else: ?>
-        <span class="px-4 py-2.5 text-sm bg-gray-100 border-2 border-gray-200 rounded-xl text-gray-400 font-semibold cursor-not-allowed">
-          Next »
-        </span>
-      <?php endif; ?>
+        <?php for ($i = $start_page; $i <= $end_page; $i++): ?>
+          <?php if ($i == $page): ?>
+            <span class="px-3 sm:px-4 py-2 text-xs sm:text-sm bg-blue-600 text-white rounded-lg font-bold">
+              <?php echo $i; ?>
+            </span>
+          <?php else: ?>
+            <a href="#" onclick="goToPage(<?php echo $i; ?>); return false;" 
+               class="px-3 sm:px-4 py-2 text-xs sm:text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition text-gray-700">
+              <?php echo $i; ?>
+            </a>
+          <?php endif; ?>
+        <?php endfor; ?>
 
+        <?php if ($end_page < $total_pages): ?>
+          <?php if ($end_page < $total_pages - 1): ?>
+            <span class="px-2 text-gray-500 text-xs sm:text-sm">...</span>
+          <?php endif; ?>
+          <a href="#" onclick="goToPage(<?php echo $total_pages; ?>); return false;" 
+             class="px-3 sm:px-4 py-2 text-xs sm:text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition text-gray-700">
+            <?php echo $total_pages; ?>
+          </a>
+        <?php endif; ?>
+
+        <?php if ($page < $total_pages): ?>
+          <a href="#" onclick="goToPage(<?php echo ($page + 1); ?>); return false;" 
+             class="px-3 sm:px-4 py-2 text-xs sm:text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition text-gray-700 font-medium">
+            Next »
+          </a>
+        <?php endif; ?>
+        
+      </div>
+
+      <div class="col-span-full mt-3 sm:mt-4 text-center text-xs sm:text-sm text-gray-600">
+        Showing <?php echo (($page - 1) * $items_per_page) + 1; ?> 
+        to <?php echo min($page * $items_per_page, $total_items); ?> 
+        of <?php echo $total_items; ?> items
+      </div>
+      <?php endif; ?>
     </div>
 
-    <div class="mt-4 text-center text-sm text-gray-600 font-medium">
-      Showing <?php echo (($page - 1) * $items_per_page) + 1; ?> 
-      to <?php echo min($page * $items_per_page, $total_items); ?> 
-      of <?php echo $total_items; ?> items
-    </div>
-    <?php endif; ?>
   </main>
 
   <footer class="ml-16 md:ml-64">

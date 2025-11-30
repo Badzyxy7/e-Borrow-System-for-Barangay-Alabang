@@ -74,11 +74,25 @@ $past_due = $conn->query($past_due_sql);
   <!-- Main Content -->
   <main class="ml-16 md:ml-64 p-6 pt-24 md:pt-28">
 
-    <!-- Welcome Banner -->
-    <div class="bg-gradient-to-r from-blue-900 via-blue-800 to-blue-700 rounded-2xl p-8 mb-8 shadow-sm">
-      <h1 class="text-3xl font-bold text-white mb-2">Admin Dashboard</h1>
-      <p class="text-blue-50 text-base">Monitor and manage all equipment, requests, and user activities.</p>
-    </div>
+     <!-- Welcome Banner with Philippine Pattern -->
+<div class="relative bg-gradient-to-r from-blue-900 via-blue-800 to-blue-700 rounded-2xl p-6 sm:p-8 mb-6 sm:mb-8 shadow-lg overflow-hidden">
+  <!-- Philippine Pattern Background Image -->
+  <div class="absolute inset-0 opacity-25">
+    <img src="../photos/logo1.jpg" alt="" class="w-full h-full object-cover">
+  </div>
+  
+  <!-- Gradient overlay: dark on left (text area) fading to transparent on right (pattern area) -->
+  <div class="absolute inset-0 bg-gradient-to-r from-blue-900/90 from-50% via-blue-900/50 via-70% to-transparent"></div>
+  
+  <!-- Content -->
+  <div class="relative z-10">
+    <h2 class="text-2xl sm:text-3xl font-bold text-white mb-2">
+      Welcome, <?php echo htmlspecialchars($_SESSION['name']); ?> 👋
+    </h2>
+    <p class="text-blue-100 text-sm sm:text-base">Here's what's happening with your equipment requests today.</p>
+  </div>
+</div>
+
 
     <!-- Stats Cards -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">

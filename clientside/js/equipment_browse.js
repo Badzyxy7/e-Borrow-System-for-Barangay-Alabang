@@ -3,18 +3,37 @@
 // ============================================
 
 // SEARCH & FILTER FUNCTIONS
+
 let searchTimeout;
 let currentPage = 1;
+let activeRequest = null; // Track active AJAX request
+
+// GROUP REQUEST VARIABLES
+let isSelectMode = false;
+let selectedItems = new Map();
+
 
 /**
  * Performs search with filters and pagination
  * @param {number} page - Page number to load
  */
+
 function performSearch(page = 1) {
   const searchInput = document.getElementById('searchInput');
   const statusFilter = document.getElementById('statusFilter');
   const searchValue = searchInput.value;
   const statusValue = statusFilter.value;
+  const resultsContainer = document.getElementById('resultsContainer');
+  
+  if (!resultsContainer) {
+    console.error('Results container not found');
+    return;
+  }
+  
+  // Cancel previous request if still pending
+  if (activeRequest) {
+    activeRequest.abort();
+  }
   
   currentPage = page;
   
@@ -25,21 +44,46 @@ function performSearch(page = 1) {
   url.searchParams.set('page', page);
   window.history.pushState({}, '', url);
   
+  // Show loading state
+  resultsContainer.style.opacity = '0.5';
+  
+  // Create AbortController for this request
+  const controller = new AbortController();
+  activeRequest = controller;
+  
   // Fetch results via AJAX
   fetch(`${window.location.pathname}?search=${encodeURIComponent(searchValue)}&status=${encodeURIComponent(statusValue)}&page=${page}&ajax=1`, {
     headers: {
       'X-Requested-With': 'XMLHttpRequest'
-    }
+    },
+    signal: controller.signal
   })
   .then(response => response.text())
   .then(html => {
-    document.getElementById('resultsContainer').innerHTML = html;
+    // Clear and replace content completely
+    resultsContainer.innerHTML = '';
+    resultsContainer.innerHTML = html;
+    resultsContainer.style.opacity = '1';
+    
+    // Re-initialize Feather icons for new content
+    if (typeof feather !== 'undefined') {
+      feather.replace();
+    }
+    
     // Only scroll when changing pages, not during search
     if (page > 1) {
-      document.getElementById('resultsContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
+    
+    activeRequest = null;
   })
-  .catch(error => console.error('Search error:', error));
+  .catch(error => {
+    if (error.name !== 'AbortError') {
+      console.error('Search error:', error);
+      resultsContainer.style.opacity = '1';
+    }
+    activeRequest = null;
+  });
 }
 
 /**
@@ -363,8 +407,13 @@ function toggleSubmitButton(id) {
 // PURPOSE & DEATH CERTIFICATE FUNCTIONS
 // ============================================
 
+// ============================================
+// UPDATED: toggleDeathCertificateField with Priority Notification
+// Replace your existing toggleDeathCertificateField function with this
+// ============================================
+
 /**
- * Toggle death certificate field based on purpose selection
+ * Toggle death certificate field AND priority notification based on purpose selection
  * @param {number} id - Equipment ID
  */
 function toggleDeathCertificateField(id) {
@@ -376,16 +425,30 @@ function toggleDeathCertificateField(id) {
   const selectedPurpose = purposeSelect.value;
   
   if (selectedPurpose === 'Funeral/Lamay') {
+    // Show death certificate field
     deathCertContainer.style.display = 'block';
+    
+    // Add smooth slide-in animation
+    deathCertContainer.style.opacity = '0';
+    deathCertContainer.style.transform = 'translateY(-10px)';
+    
+    setTimeout(() => {
+      deathCertContainer.style.transition = 'all 0.3s ease-out';
+      deathCertContainer.style.opacity = '1';
+      deathCertContainer.style.transform = 'translateY(0)';
+    }, 10);
+    
   } else {
+    // Hide death certificate field
     deathCertContainer.style.display = 'none';
+    
     // Clear the uploaded file if purpose changes
     clearDeathCertificate(id);
   }
 }
 
 /**
- * Handle death certificate file upload
+ * Handle death certificate file upload with priority notification
  * @param {number} id - Equipment ID
  * @param {HTMLInputElement} input - File input element
  */
@@ -428,7 +491,7 @@ function handleDeathCertificateUpload(id, input) {
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
         </svg>
-        <span class="text-sm text-blue-700 font-medium">Uploading...</span>
+        <span class="text-sm text-blue-700 font-medium">Uploading certificate...</span>
       </div>
     `;
   }
@@ -450,17 +513,28 @@ function handleDeathCertificateUpload(id, input) {
         filenameInput.value = data.filename;
       }
       
-      // Show success message
+      // Show success message with priority notification
       if (statusDiv) {
         statusDiv.innerHTML = `
           <div class="bg-green-50 border border-green-200 rounded-xl p-3 flex items-center gap-3">
             <svg class="w-5 h-5 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
-            <span class="text-sm text-green-700 font-medium">Certificate uploaded successfully</span>
+            <div class="flex-1">
+              <span class="text-sm text-green-700 font-medium">Certificate uploaded successfully</span>
+              <p class="text-xs text-green-600 mt-1">✓ Your request will be prioritized</p>
+            </div>
           </div>
         `;
       }
+      
+      // Add a subtle success animation
+      if (statusDiv) {
+        statusDiv.style.animation = 'successFadeIn 0.5s ease-out';
+      }
+      
+      console.log('✓ Death certificate uploaded - Priority flag will be set');
+      
     } else {
       // Show error message
       showValidationModal(
@@ -501,8 +575,44 @@ function clearDeathCertificate(id) {
   if (filenameInput) filenameInput.value = '';
   if (fileInput) fileInput.value = '';
   if (cameraInput) cameraInput.value = '';
-  if (statusDiv) statusDiv.classList.add('hidden');
+  if (statusDiv) {
+    statusDiv.classList.add('hidden');
+    statusDiv.innerHTML = '';
+  }
+  
+  console.log('Death certificate cleared - Priority flag will not be set');
 }
+
+// ============================================
+// ADD THIS CSS FOR ANIMATIONS (if not already present)
+// ============================================
+const style = document.createElement('style');
+style.textContent = `
+  @keyframes successFadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  @keyframes priorityGlow {
+    0%, 100% { 
+      box-shadow: 0 0 0 0 rgba(147, 51, 234, 0.4);
+    }
+    50% { 
+      box-shadow: 0 0 0 10px rgba(147, 51, 234, 0);
+    }
+  }
+  
+  .priority-notification {
+    animation: priorityGlow 2s ease-out;
+  }
+`;
+document.head.appendChild(style);
 
 // ============================================
 // AVAILABILITY CHECK FUNCTIONS
@@ -672,16 +782,29 @@ function submitRequest(id) {
   form.method = 'POST';
   form.action = '';
 
+  const purposeValue = document.getElementById('purpose_' + id).value;
+  const deathCertValue = document.getElementById('death_certificate_filename_' + id).value;
+
+  // DEBUG: Log values before submission
+  console.log('=== FORM SUBMISSION DEBUG ===');
+  console.log('Equipment ID:', id);
+  console.log('Purpose:', purposeValue);
+  console.log('Death Certificate:', deathCertValue);
+  console.log('Purpose Element:', document.getElementById('purpose_' + id));
+  console.log('Death Cert Element:', document.getElementById('death_certificate_filename_' + id));
+
   const fields = {
     'equipment_id': document.getElementById('equipment_id_' + id).value,
     'quantity': document.getElementById('quantity_' + id).value,
     'borrow_datetime': document.getElementById('borrow_datetime_' + id).value,
     'return_datetime': document.getElementById('return_datetime_' + id).value,
     'description': document.getElementById('description_' + id).value,
-    'purpose': document.getElementById('purpose_' + id).value,
-    'death_certificate': document.getElementById('death_certificate_filename_' + id).value,
+    'purpose': purposeValue,
+    'death_certificate': deathCertValue,
     'request': '1'
   };
+
+  console.log('All fields:', fields);
 
   for (const [name, value] of Object.entries(fields)) {
     const input = document.createElement('input');
@@ -694,7 +817,6 @@ function submitRequest(id) {
   document.body.appendChild(form);
   form.submit();
 }
-
 // ============================================
 // ERROR & SUCCESS MODAL FUNCTIONS
 // ============================================
@@ -720,11 +842,7 @@ function closeSuccessModal() {
   modal.style.display = 'none';
   document.body.style.overflow = '';
 }
-
-// ============================================
 // MODAL BACKDROP CLICK HANDLERS
-// ============================================
-
 /**
  * Close modals when clicking outside
  */
@@ -743,12 +861,7 @@ function initializeModalBackdropHandlers() {
     });
   });
 }
-
-
-// ============================================
 // INITIALIZATION
-// ============================================
-
 /**
  * Initialize all event listeners and components
  */
@@ -779,3 +892,553 @@ if (document.readyState === 'loading') {
 } else {
   initializeEquipmentBrowse();
 }
+
+// ============================================
+// GROUP REQUEST FUNCTIONALITY
+// ============================================
+
+// IMPORTANT: Add these lines at the TOP of your equipment_browse.js file
+// (right after the existing let declarations)
+
+
+/**
+ * Toggle select mode on/off
+ */
+function toggleSelectMode() {
+  isSelectMode = !isSelectMode;
+  const selectBtn = document.getElementById('selectModeBtn');
+  const selectIcon = document.getElementById('selectModeIcon');
+  const selectTooltip = document.getElementById('selectModeTooltip');
+  const floatingCard = document.getElementById('floatingActionCard');
+  const cards = document.querySelectorAll('.equipment-card');
+  
+  if (isSelectMode) {
+    // Enter select mode
+    selectIcon.innerHTML = `
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+    `;
+    selectTooltip.textContent = 'Cancel Selection';
+    selectBtn.classList.remove('from-blue-900', 'to-blue-700');
+    selectBtn.classList.add('from-gray-600', 'to-gray-700');
+    
+    // Show checkboxes on available equipment cards only
+    cards.forEach(card => {
+      const checkboxContainer = card.querySelector('.equipment-checkbox-container');
+      const requestBtn = card.querySelector('.individual-request-btn');
+      const availableBadge = card.querySelector('.equipment-badge-available');
+      const isAvailable = requestBtn && !requestBtn.disabled;
+      
+      if (checkboxContainer && isAvailable) {
+        // Only show checkbox for available items
+        checkboxContainer.classList.remove('hidden');
+        
+        // Hide available badge when in select mode
+        if (availableBadge) {
+          availableBadge.classList.add('hidden');
+        }
+      }
+      
+      // Hide individual request button in select mode
+      if (requestBtn) {
+        requestBtn.style.display = 'none';
+      }
+    });
+    
+    // Show floating action card if items selected
+    if (selectedItems.size > 0) {
+      floatingCard.classList.remove('hidden');
+    }
+  } else {
+    // Exit select mode
+    selectIcon.innerHTML = `
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+    `;
+    selectTooltip.textContent = 'Select Equipment';
+    selectBtn.classList.add('from-blue-900', 'to-blue-700');
+    selectBtn.classList.remove('from-gray-600', 'to-gray-700');
+    
+    // Hide checkboxes and restore buttons/badges
+    cards.forEach(card => {
+      const checkboxContainer = card.querySelector('.equipment-checkbox-container');
+      const checkbox = card.querySelector('.equipment-checkbox');
+      const requestBtn = card.querySelector('.individual-request-btn');
+      const availableBadge = card.querySelector('.equipment-badge-available');
+      
+      if (checkboxContainer) {
+        checkboxContainer.classList.add('hidden');
+      }
+      
+      if (checkbox) {
+        checkbox.checked = false;
+      }
+      
+      if (requestBtn) {
+        requestBtn.style.display = 'block';
+      }
+      
+      // Show available badge again
+      if (availableBadge) {
+        availableBadge.classList.remove('hidden');
+      }
+      
+      // Remove selection styling
+      card.classList.remove('ring-2', 'ring-blue-500', 'bg-blue-50');
+    });
+    
+    // Clear selections and hide floating card
+    selectedItems.clear();
+    floatingCard.classList.add('hidden');
+    updateFloatingCard();
+  }
+}
+
+/**
+ * Handle equipment selection
+ * @param {number} equipmentId - Equipment ID
+ * @param {HTMLInputElement} checkbox - Checkbox element
+ */
+function toggleEquipmentSelection(equipmentId, checkbox) {
+  const card = checkbox.closest('.equipment-card');
+  
+  if (checkbox.checked) {
+    // Add to selection
+    const equipmentData = {
+      id: equipmentId,
+      name: card.querySelector('[data-equipment-name]').textContent,
+      description: card.querySelector('[data-equipment-desc]').textContent,
+      image: card.querySelector('[data-equipment-image]').src,
+      total_qty: parseInt(card.querySelector('[data-equipment-qty]').textContent),
+      quantity: 1 // Default quantity
+    };
+    
+    selectedItems.set(equipmentId, equipmentData);
+    card.classList.add('ring-2', 'ring-blue-500', 'bg-blue-50');
+  } else {
+    // Remove from selection
+    selectedItems.delete(equipmentId);
+    card.classList.remove('ring-2', 'ring-blue-500', 'bg-blue-50');
+  }
+  
+  updateFloatingCard();
+}
+
+/**
+ * Update floating action card
+ */
+function updateFloatingCard() {
+  const floatingCard = document.getElementById('floatingActionCard');
+  const countSpan = document.getElementById('selectedCount');
+  
+  if (selectedItems.size > 0) {
+    floatingCard.classList.remove('hidden');
+    countSpan.textContent = selectedItems.size;
+  } else {
+    floatingCard.classList.add('hidden');
+  }
+}
+
+/**
+ * Clear all selections
+ */
+function clearAllSelections() {
+  selectedItems.clear();
+  
+  document.querySelectorAll('.equipment-checkbox').forEach(checkbox => {
+    checkbox.checked = false;
+    const card = checkbox.closest('.equipment-card');
+    card.classList.remove('ring-2', 'ring-blue-500', 'bg-blue-50');
+  });
+  
+  updateFloatingCard();
+}
+
+/**
+ * Open quantity confirmation modal
+ */
+function openQuantityModal() {
+  if (selectedItems.size === 0) {
+    showValidationModal('No Items Selected', 'Please select at least one equipment item.', 'warning');
+    return;
+  }
+  
+  const modal = document.getElementById('quantityConfirmModal');
+  const itemsContainer = document.getElementById('quantityModalItems');
+  
+  // Clear previous content
+  itemsContainer.innerHTML = '';
+  
+  // Populate items
+  selectedItems.forEach((item, id) => {
+    const itemHtml = `
+      <div class="flex items-start gap-4 p-4 bg-gray-50 rounded-xl">
+        <img src="${item.image}" class="w-20 h-20 object-cover rounded-lg flex-shrink-0">
+        <div class="flex-1 min-w-0">
+          <h4 class="font-bold text-gray-900 mb-1">${item.name}</h4>
+          <p class="text-sm text-gray-600 mb-2">Available: ${item.total_qty}</p>
+          <div class="flex items-center gap-2">
+            <label class="text-sm font-medium text-gray-700">Quantity:</label>
+            <input type="number" 
+                   id="qty_${id}" 
+                   value="${item.quantity}"
+                   min="1" 
+                   max="${item.total_qty}"
+                   onchange="updateItemQuantity(${id}, this.value)"
+                   class="w-20 px-3 py-2 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+          </div>
+        </div>
+      </div>
+    `;
+    itemsContainer.insertAdjacentHTML('beforeend', itemHtml);
+  });
+  
+  modal.classList.remove('hidden');
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+/**
+ * Close quantity modal
+ */
+function closeQuantityModal() {
+  const modal = document.getElementById('quantityConfirmModal');
+  modal.classList.add('hidden');
+  modal.style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+/**
+ * Update item quantity
+ * @param {number} equipmentId - Equipment ID
+ * @param {number} quantity - New quantity
+ */
+function updateItemQuantity(equipmentId, quantity) {
+  const item = selectedItems.get(equipmentId);
+  if (item) {
+    item.quantity = parseInt(quantity);
+  }
+}
+
+/**
+ * Proceed to date selection
+ */
+function proceedToDateSelection() {
+  // Validate all quantities
+  let isValid = true;
+  selectedItems.forEach((item, id) => {
+    const qtyInput = document.getElementById(`qty_${id}`);
+    if (!qtyInput || qtyInput.value <= 0 || qtyInput.value > item.total_qty) {
+      isValid = false;
+    }
+  });
+  
+  if (!isValid) {
+    showValidationModal('Invalid Quantity', 'Please enter valid quantities for all items.', 'warning');
+    return;
+  }
+  
+  // Close quantity modal
+  closeQuantityModal();
+  
+  // Open date selection modal
+  openGroupRequestModal();
+}
+
+/**
+ * Open group request modal with date selection
+ */
+function openGroupRequestModal() {
+  const modal = document.getElementById('groupRequestModal');
+  const reviewContainer = document.getElementById('groupRequestReview');
+  
+  // Clear and populate review
+  reviewContainer.innerHTML = '';
+  
+  selectedItems.forEach((item, id) => {
+    const itemHtml = `
+      <div class="flex items-center gap-4 p-4 bg-white rounded-xl border-2 border-gray-100">
+        <img src="${item.image}" class="w-16 h-16 object-cover rounded-lg">
+        <div class="flex-1">
+          <h4 class="font-bold text-gray-900">${item.name}</h4>
+          <p class="text-sm text-gray-600">Quantity: ${item.quantity}</p>
+        </div>
+      </div>
+    `;
+    reviewContainer.insertAdjacentHTML('beforeend', itemHtml);
+  });
+  
+  // Initialize date pickers
+  initializeGroupDatePickers();
+  
+  modal.classList.remove('hidden');
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+/**
+ * Close group request modal
+ */
+function closeGroupRequestModal() {
+  const modal = document.getElementById('groupRequestModal');
+  modal.classList.add('hidden');
+  modal.style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+/**
+ * Initialize date pickers for group request
+ */
+function initializeGroupDatePickers() {
+  const borrowInput = document.getElementById('group_borrow_datetime');
+  const returnInput = document.getElementById('group_return_datetime');
+  
+  if (!borrowInput || !returnInput) return;
+  
+  // Destroy existing instances if any
+  if (borrowInput._flatpickr) borrowInput._flatpickr.destroy();
+  if (returnInput._flatpickr) returnInput._flatpickr.destroy();
+  
+  const now = new Date();
+  
+  flatpickr("#group_borrow_datetime", {
+    enableTime: true,
+    dateFormat: "Y-m-d H:i",
+    time_24hr: true,
+    minDate: now,
+    minuteIncrement: 30,
+    altInput: true,
+    altFormat: "F j, Y at h:i K"
+  });
+  
+  flatpickr("#group_return_datetime", {
+    enableTime: true,
+    dateFormat: "Y-m-d H:i",
+    time_24hr: true,
+    minDate: now,
+    minuteIncrement: 30,
+    altInput: true,
+    altFormat: "F j, Y at h:i K"
+  });
+}
+
+/**
+ * Submit group request
+ */
+function submitGroupRequest() {
+  const purpose = document.getElementById('group_purpose').value;
+  const borrowDate = document.getElementById('group_borrow_datetime').value;
+  const returnDate = document.getElementById('group_return_datetime').value;
+  const description = document.getElementById('group_description').value;
+  const deathCertificate = document.getElementById('group_death_certificate_filename').value;
+  
+  // Validation
+  if (!purpose) {
+    showValidationModal('Purpose Required', 'Please select a purpose for borrowing.', 'warning');
+    return;
+  }
+  
+  // Validate death certificate for funeral
+  if (purpose === 'Funeral/Lamay' && !deathCertificate) {
+    showValidationModal('Certificate Required', 'Please upload the death certificate for funeral/lamay purposes.', 'warning');
+    return;
+  }
+  
+  if (!borrowDate || !returnDate) {
+    showValidationModal('Dates Required', 'Please select both borrow and return dates.', 'warning');
+    return;
+  }
+  
+  const borrow = new Date(borrowDate);
+  const returnD = new Date(returnDate);
+  
+  if (returnD <= borrow) {
+    showValidationModal('Invalid Dates', 'Return date must be after borrow date.', 'error');
+    return;
+  }
+  
+  // Prepare data with priority flag
+  const requestData = {
+    items: Array.from(selectedItems.values()),
+    borrow_date: borrowDate,
+    return_date: returnDate,
+    purpose: purpose,
+    description: description,
+    death_certificate: deathCertificate,
+    priority: (purpose === 'Funeral/Lamay' && deathCertificate) ? 1 : 0
+  };
+  
+  // Submit via POST (submits to the same page)
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = ''; // Empty action submits to current page
+  
+  const input = document.createElement('input');
+  input.type = 'hidden';
+  input.name = 'group_request_data';
+  input.value = JSON.stringify(requestData);
+  form.appendChild(input);
+  
+  document.body.appendChild(form);
+  form.submit();
+}
+
+/**
+ * Toggle death certificate field for group request
+ */
+function toggleGroupDeathCertificateField() {
+  const purposeSelect = document.getElementById('group_purpose');
+  const deathCertContainer = document.getElementById('group_death_certificate_container');
+  
+  if (!purposeSelect || !deathCertContainer) return;
+  
+  const selectedPurpose = purposeSelect.value;
+  
+  if (selectedPurpose === 'Funeral/Lamay') {
+    deathCertContainer.style.display = 'block';
+    
+    // Add smooth slide-in animation
+    deathCertContainer.style.opacity = '0';
+    deathCertContainer.style.transform = 'translateY(-10px)';
+    
+    setTimeout(() => {
+      deathCertContainer.style.transition = 'all 0.3s ease-out';
+      deathCertContainer.style.opacity = '1';
+      deathCertContainer.style.transform = 'translateY(0)';
+    }, 10);
+  } else {
+    deathCertContainer.style.display = 'none';
+    clearGroupDeathCertificate();
+  }
+}
+
+/**
+ * Handle group death certificate upload
+ */
+function handleGroupDeathCertificateUpload(input) {
+  const file = input.files[0];
+  
+  if (!file) return;
+  
+  // Validate file size (20MB max)
+  const maxSize = 20 * 1024 * 1024;
+  if (file.size > maxSize) {
+    showValidationModal(
+      'File Too Large',
+      'File size exceeds 20MB limit. Please choose a smaller file.',
+      'error'
+    );
+    input.value = '';
+    return;
+  }
+  
+  // Validate file type
+  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+  if (!allowedTypes.includes(file.type)) {
+    showValidationModal(
+      'Invalid File Type',
+      'Invalid file type. Only JPG, JPEG, and PNG files are allowed.',
+      'error'
+    );
+    input.value = '';
+    return;
+  }
+  
+  // Show uploading indicator
+  const statusDiv = document.getElementById('group_death_certificate_status');
+  if (statusDiv) {
+    statusDiv.classList.remove('hidden');
+    statusDiv.innerHTML = `
+      <div class="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center gap-3">
+        <svg class="animate-spin w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span class="text-sm text-blue-700 font-medium">Uploading certificate...</span>
+      </div>
+    `;
+  }
+  
+  // Create FormData and upload
+  const formData = new FormData();
+  formData.append('death_certificate', file);
+  
+  fetch('upload_death_certificate.php', {
+    method: 'POST',
+    body: formData
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (data.success) {
+      const filenameInput = document.getElementById('group_death_certificate_filename');
+      if (filenameInput) {
+        filenameInput.value = data.filename;
+      }
+      
+      if (statusDiv) {
+        statusDiv.innerHTML = `
+          <div class="bg-green-50 border border-green-200 rounded-xl p-3 flex items-center gap-3">
+            <svg class="w-5 h-5 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+            <div class="flex-1">
+              <span class="text-sm text-green-700 font-medium">Certificate uploaded successfully</span>
+              <p class="text-xs text-green-600 mt-1">✓ Your request will be prioritized</p>
+            </div>
+          </div>
+        `;
+      }
+      
+      console.log('✓ Group death certificate uploaded - Priority flag will be set');
+    } else {
+      showValidationModal(
+        'Upload Failed',
+        'Upload failed: ' + data.message,
+        'error'
+      );
+      if (statusDiv) statusDiv.classList.add('hidden');
+      input.value = '';
+    }
+  })
+  .catch(error => {
+    console.error('Upload error:', error);
+    showValidationModal(
+      'Upload Error',
+      'An error occurred during upload. Please try again.',
+      'error'
+    );
+    if (statusDiv) statusDiv.classList.add('hidden');
+    input.value = '';
+  });
+}
+
+/**
+ * Clear group death certificate
+ */
+function clearGroupDeathCertificate() {
+  const filenameInput = document.getElementById('group_death_certificate_filename');
+  const fileInput = document.getElementById('group_death_certificate_file');
+  const cameraInput = document.getElementById('group_death_certificate_camera');
+  const statusDiv = document.getElementById('group_death_certificate_status');
+  
+  if (filenameInput) filenameInput.value = '';
+  if (fileInput) fileInput.value = '';
+  if (cameraInput) cameraInput.value = '';
+  if (statusDiv) {
+    statusDiv.classList.add('hidden');
+    statusDiv.innerHTML = '';
+  }
+}
+
+// Add to existing initializeEquipmentBrowse function
+function initializeGroupRequestFeature() {
+  console.log('Initializing Group Request Feature...');
+  
+  // Add event listener for select mode button
+  const selectBtn = document.getElementById('selectModeBtn');
+  if (selectBtn) {
+    selectBtn.addEventListener('click', toggleSelectMode);
+  }
+}
+
+// Call in main initialization
+// Add this line to initializeEquipmentBrowse():
+// initializeGroupRequestFeature();

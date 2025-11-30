@@ -456,4 +456,418 @@ function getCurrentAdminName($conn) {
     }
     return 'Unknown Admin';
 }
+
+// ADD THIS FUNCTION TO requests_functions.php
+
+function handleGroupRequestAction($conn, $post) {
+    $action = $post['action'];
+    $group_request_id = $conn->real_escape_string($post['group_request_id']);
+    $request_ids = json_decode($post['request_ids'], true);
+    
+    if (empty($request_ids) || !is_array($request_ids)) {
+        return;
+    }
+    
+    $admin_id = $_SESSION['user_id'];
+    $timestamp = date('Y-m-d H:i:s');
+    
+    // Get first request for email details
+    $first_req = getRequestDetails($conn, $request_ids[0]);
+    if (!$first_req) return;
+    
+    $conn->begin_transaction();
+    
+    try {
+        switch ($action) {
+            case 'approve_group':
+                foreach ($request_ids as $id) {
+                    $req = getRequestDetails($conn, $id);
+                    if (!$req) continue;
+                    
+                    $conn->query("UPDATE borrow_requests SET 
+                        status='approved',
+                        approved_by=$admin_id,
+                        approved_at='$timestamp'
+                        WHERE id=$id");
+                    
+                    $conn->query("UPDATE equipment SET status='unavailable' WHERE id={$req['equipment_id']}");
+                }
+                
+                $conn->commit();
+                
+                // Send single email for group
+                $itemsList = '';
+                foreach ($request_ids as $id) {
+                    $req = getRequestDetails($conn, $id);
+                    $itemsList .= "<li><strong>{$req['equipment_name']}</strong> - Quantity: {$req['qty']}</li>";
+                }
+                
+                $body = emailTemplateGroup('approved', $first_req, $itemsList, count($request_ids));
+                sendEmail($first_req['user_email'], "🎉 Group Request Approved", $body);
+                break;
+                
+            case 'reject_group':
+                $reason = $conn->real_escape_string($post['reason']);
+                
+                foreach ($request_ids as $id) {
+                    $conn->query("UPDATE borrow_requests SET 
+                        status='declined', 
+                        rejection_reason='$reason',
+                        rejected_by=$admin_id,
+                        rejected_at='$timestamp'
+                        WHERE id=$id");
+                }
+                
+                $conn->commit();
+                
+                // Send single email for group rejection
+                $itemsList = '';
+                foreach ($request_ids as $id) {
+                    $req = getRequestDetails($conn, $id);
+                    $itemsList .= "<li><strong>{$req['equipment_name']}</strong> - Quantity: {$req['qty']}</li>";
+                }
+                
+                $body = emailTemplateGroup('declined', $first_req, $itemsList, count($request_ids), $reason);
+                sendEmail($first_req['user_email'], "Group Request Declined", $body);
+                break;
+        }
+        
+        header("Location: requests_tab.php?tab=pending");
+        exit();
+        
+    } catch (Exception $e) {
+        $conn->rollback();
+        error_log("Group action error: " . $e->getMessage());
+        header("Location: requests_tab.php?tab=pending&error=1");
+        exit();
+    }
+}
+
+// ADD THIS FUNCTION after handleGroupRequestAction
+
+function handleGroupDeliveryAction($conn, $post, $files) {
+    $group_request_id = $conn->real_escape_string($post['group_request_id']);
+    $request_ids = json_decode($post['request_ids'], true);
+    
+    if (empty($request_ids) || !is_array($request_ids)) {
+        return;
+    }
+    
+    $admin_id = $_SESSION['user_id'];
+    $timestamp = date('Y-m-d H:i:s');
+    
+    // Upload delivery photo
+    $photo = null;
+    if (isset($files['delivery_photo']) && $files['delivery_photo']['error'] == 0) {
+        $photo = uploadPhoto($files['delivery_photo'], 'delivery', $group_request_id);
+    }
+    
+    // Get first request for email details
+    $first_req = getRequestDetails($conn, $request_ids[0]);
+    if (!$first_req) return;
+    
+    $conn->begin_transaction();
+    
+    try {
+        foreach ($request_ids as $id) {
+            $req = getRequestDetails($conn, $id);
+            if (!$req) continue;
+            
+            $conn->query("UPDATE borrow_requests SET 
+                status='delivered', 
+                delivery_photo='$photo',
+                delivered_by=$admin_id,
+                delivered_at='$timestamp'
+                WHERE id=$id");
+            
+            $conn->query("INSERT INTO borrow_logs (request_id, user_id, equipment_id, qty, borrow_date, actual_pickup_date, expected_return_date, log_created_at)
+                VALUES ($id, {$req['user_id']}, {$req['equipment_id']}, {$req['qty']}, '{$req['borrow_date']}', NOW(), '{$req['return_date']}', NOW())");
+        }
+        
+        $conn->commit();
+        
+        // Send single email for group delivery
+        $itemsList = '';
+        foreach ($request_ids as $id) {
+            $req = getRequestDetails($conn, $id);
+            $itemsList .= "<li><strong>{$req['equipment_name']}</strong> - Quantity: {$req['qty']}</li>";
+        }
+        
+        $body = emailTemplateGroup('delivered', $first_req, $itemsList, count($request_ids));
+        sendEmail($first_req['user_email'], "📦 Group Equipment Delivered", $body);
+        
+        header("Location: requests_tab.php?tab=delivered");
+        exit();
+        
+    } catch (Exception $e) {
+        $conn->rollback();
+        error_log("Group delivery error: " . $e->getMessage());
+        header("Location: requests_tab.php?tab=approved&error=1");
+        exit();
+    }
+}
+
+// ADD THIS EMAIL TEMPLATE for group delivery
+// Update the emailTemplateGroup function to include 'delivered' case:
+function emailTemplateGroup($type, $req, $itemsList, $itemCount, $reason = '') {
+    $header = "<html><body style='font-family:Arial,sans-serif;'><div style='max-width:600px;margin:0 auto;padding:20px;background:#f5f5f5;'><div style='background:white;padding:30px;border-radius:10px;'>";
+    $footer = "<p style='color:#666;font-size:14px;margin-top:30px;'>Thank you for using eBorrow System!</p></div></div></body></html>";
+    
+    $approved_by = !empty($req['approved_by_name']) ? $req['approved_by_name'] : 'Staff';
+    $delivered_by = !empty($req['delivered_by_name']) ? $req['delivered_by_name'] : 'Staff';
+    
+    $templates = [
+        'approved' => "<h2 style='color:#16a34a;'>✅ Group Request Approved</h2>
+            <p>Dear <strong>{$req['user_name']}</strong>,</p>
+            <p>Your group borrow request has been approved!</p>
+            <div style='background:#dbeafe;padding:20px;border-radius:8px;margin:20px 0;border-left:4px solid #2563eb;'>
+            <p style='margin:0 0 10px 0;'><strong>📦 {$itemCount} Items Approved:</strong></p>
+            <ul style='margin:0;padding-left:20px;'>{$itemsList}</ul>
+            </div>
+            <div style='background:#f0fdf4;padding:20px;border-radius:8px;margin:20px 0;'>
+            <p><strong>Period:</strong> " . date('M d, Y', strtotime($req['borrow_date'])) . " to " . date('M d, Y', strtotime($req['return_date'])) . "</p>
+            <p><strong>Purpose:</strong> {$req['purpose']}</p>
+            <p><strong>Address:</strong> {$req['address']}</p></div>
+            <div style='background:#dbeafe;padding:15px;border-radius:8px;border-left:4px solid #1e3a8a;'>
+            <p style='margin:0;color:#1e40af;'><strong>📦 Delivery:</strong> Between 9:00 AM - 5:00 PM</p>
+            <p style='margin:5px 0 0 0;color:#1e40af;'><strong>Approved by:</strong> {$approved_by}</p></div>",
+            
+        'delivered' => "<h2 style='color:#2563eb;'>📦 Group Equipment Delivered</h2>
+            <p>Dear <strong>{$req['user_name']}</strong>,</p>
+            <p>Your group equipment has been delivered!</p>
+            <div style='background:#dbeafe;padding:20px;border-radius:8px;margin:20px 0;border-left:4px solid #2563eb;'>
+            <p style='margin:0 0 10px 0;'><strong>📦 {$itemCount} Items Delivered:</strong></p>
+            <ul style='margin:0;padding-left:20px;'>{$itemsList}</ul>
+            </div>
+            <div style='background:#eff6ff;padding:20px;border-radius:8px;margin:20px 0;'>
+            <p><strong>Delivered by:</strong> {$delivered_by}</p>
+            <p><strong>Return Date:</strong> " . date('M d, Y', strtotime($req['return_date'])) . "</p></div>
+            <div style='background:#fef3c7;padding:15px;border-radius:8px;border-left:4px solid #f59e0b;'>
+            <p style='margin:0;color:#92400e;'><strong>⚠️</strong> Please return all items on time to avoid penalties.</p></div>",
+            
+        'declined' => "<h2 style='color:#dc2626;'>❌ Group Request Declined</h2>
+            <p>Dear <strong>{$req['user_name']}</strong>,</p>
+            <p>Your group request has been declined.</p>
+            <div style='background:#fee2e2;padding:20px;border-radius:8px;margin:20px 0;border-left:4px solid #dc2626;'>
+            <p style='margin:0 0 10px 0;'><strong>{$itemCount} Items Declined:</strong></p>
+            <ul style='margin:0;padding-left:20px;'>{$itemsList}</ul>
+            </div>
+            <div style='background:#fef2f2;padding:20px;border-radius:8px;margin:20px 0;border-left:4px solid #dc2626;'>
+            <p><strong>Reason:</strong> {$reason}</p></div>"
+    ];
+    
+    return $header . ($templates[$type] ?? '') . $footer;
+}
+
+/**
+ * Handle Group Return Approval
+ */
+function handleGroupReturnApproval($conn, $post) {
+    $group_request_id = $conn->real_escape_string($post['group_request_id']);
+    
+    // Get all request IDs in this group that have return_requested = 1
+    $result = $conn->query("SELECT br.id 
+                           FROM borrow_requests br
+                           JOIN borrow_logs bl ON br.id = bl.request_id
+                           WHERE br.group_request_id = '$group_request_id' 
+                           AND bl.return_requested = 1
+                           AND (bl.return_approved IS NULL OR bl.return_approved = 0)");
+    
+    if (!$result || $result->num_rows == 0) {
+        header("Location: requests_tab.php?tab=return_requests&error=no_requests");
+        exit();
+    }
+    
+    $request_ids = [];
+    while ($row = $result->fetch_assoc()) {
+        $request_ids[] = $row['id'];
+    }
+    
+    if (empty($request_ids)) {
+        header("Location: requests_tab.php?tab=return_requests&error=invalid");
+        exit();
+    }
+    
+    // Get first request details for email
+    $first_req = getRequestDetails($conn, $request_ids[0]);
+    if (!$first_req) {
+        header("Location: requests_tab.php?tab=return_requests&error=invalid");
+        exit();
+    }
+    
+    $conn->begin_transaction();
+    
+    try {
+        // Approve return for all items in the group
+        foreach ($request_ids as $id) {
+            $conn->query("UPDATE borrow_logs SET return_approved = 1 
+                         WHERE request_id = $id");
+        }
+        
+        $conn->commit();
+        
+        // Build items list for email
+        $itemsList = '';
+        foreach ($request_ids as $id) {
+            $req = getRequestDetails($conn, $id);
+            if ($req) {
+                $itemsList .= "<li><strong>" . htmlspecialchars($req['equipment_name']) . "</strong> - Quantity: {$req['qty']}</li>";
+            }
+        }
+        
+        // Send email notification
+        $body = emailTemplateGroupReturn('return_approved', $first_req, $itemsList, count($request_ids));
+        sendEmail($first_req['user_email'], "Return Request Approved - Group Pickup", $body);
+        
+        header("Location: requests_tab.php?tab=return_requests&success=approved");
+        exit();
+        
+    } catch (Exception $e) {
+        $conn->rollback();
+        error_log("Group return approval error: " . $e->getMessage());
+        header("Location: requests_tab.php?tab=return_requests&error=approval_failed");
+        exit();
+    }
+}
+
+/**
+ * Handle Group Return (Mark as Returned)
+ */
+function handleGroupReturn($conn, $post, $files) {
+    $group_request_id = $conn->real_escape_string($post['group_request_id']);
+    
+    // Get all request IDs in this group that are approved for return
+    $result = $conn->query("SELECT br.id 
+                           FROM borrow_requests br
+                           JOIN borrow_logs bl ON br.id = bl.request_id
+                           WHERE br.group_request_id = '$group_request_id' 
+                           AND bl.return_approved = 1
+                           AND br.status = 'delivered'");
+    
+    if (!$result || $result->num_rows == 0) {
+        header("Location: requests_tab.php?tab=return_requests&error=no_approved");
+        exit();
+    }
+    
+    $request_ids = [];
+    while ($row = $result->fetch_assoc()) {
+        $request_ids[] = $row['id'];
+    }
+    
+    if (empty($request_ids)) {
+        header("Location: requests_tab.php?tab=return_requests&error=invalid");
+        exit();
+    }
+    
+    // Get first request details for email
+    $first_req = getRequestDetails($conn, $request_ids[0]);
+    if (!$first_req) {
+        header("Location: requests_tab.php?tab=return_requests&error=invalid");
+        exit();
+    }
+    
+    $admin_id = $_SESSION['user_id'];
+    $timestamp = date('Y-m-d H:i:s');
+    
+    // Upload return photo
+    $return_photo = null;
+    if (isset($files['return_photo']) && $files['return_photo']['error'] == 0) {
+        $return_photo = uploadPhoto($files['return_photo'], 'return', $group_request_id);
+    }
+    
+    $conn->begin_transaction();
+    
+    try {
+        foreach ($request_ids as $id) {
+            $req = getRequestDetails($conn, $id);
+            if (!$req) continue;
+            
+            // Update borrow_requests status
+            $conn->query("UPDATE borrow_requests SET 
+                status = 'returned',
+                returned_by = $admin_id,
+                returned_at = '$timestamp'
+                WHERE id = $id");
+            
+            // Update borrow_logs
+            $conn->query("UPDATE borrow_logs SET 
+                actual_return_date = NOW(), 
+                staff_checked_condition = 'checked',
+                is_damaged = 0,
+                return_photo = " . ($return_photo ? "'$return_photo'" : "NULL") . "
+                WHERE request_id = $id");
+            
+            // Make equipment available again
+            $conn->query("UPDATE equipment SET status = 'available' 
+                         WHERE id = {$req['equipment_id']}");
+        }
+        
+        $conn->commit();
+        
+        // Build items list for email
+        $itemsList = '';
+        foreach ($request_ids as $id) {
+            $req = getRequestDetails($conn, $id);
+            if ($req) {
+                $itemsList .= "<li><strong>" . htmlspecialchars($req['equipment_name']) . "</strong> - Quantity: {$req['qty']}</li>";
+            }
+        }
+        
+        // Send email notification
+        $body = emailTemplateGroupReturn('returned', $first_req, $itemsList, count($request_ids));
+        sendEmail($first_req['user_email'], "Equipment Group Return Confirmed", $body);
+        
+        header("Location: requests_tab.php?tab=returned&success=returned");
+        exit();
+        
+    } catch (Exception $e) {
+        $conn->rollback();
+        error_log("Group return error: " . $e->getMessage());
+        header("Location: requests_tab.php?tab=return_requests&error=return_failed");
+        exit();
+    }
+}
+
+/**
+ * Email Template for Group Returns
+ */
+function emailTemplateGroupReturn($type, $req, $itemsList, $itemCount) {
+    $header = "<html><body style='font-family:Arial,sans-serif;'><div style='max-width:600px;margin:0 auto;padding:20px;background:#f5f5f5;'><div style='background:white;padding:30px;border-radius:10px;'>";
+    $footer = "<p style='color:#666;font-size:14px;margin-top:30px;'>Thank you for using eBorrow System!</p></div></div></body></html>";
+    
+    $returned_by = !empty($req['returned_by_name']) ? $req['returned_by_name'] : 'Staff';
+    
+    $templates = [
+        'return_approved' => "<h2 style='color:#7c3aed;'>✅ Group Return Request Approved</h2>
+            <p>Dear <strong>" . htmlspecialchars($req['user_name']) . "</strong>,</p>
+            <p>Your group return request has been approved. Please prepare all items for pickup.</p>
+            <div style='background:#ede9fe;padding:20px;border-radius:8px;margin:20px 0;border-left:4px solid #7c3aed;'>
+            <p style='margin:0 0 10px 0;'><strong>📦 {$itemCount} Items to Return:</strong></p>
+            <ul style='margin:0;padding-left:20px;'>{$itemsList}</ul>
+            </div>
+            <div style='background:#dbeafe;padding:15px;border-radius:8px;border-left:4px solid #1e3a8a;'>
+            <p style='margin:0;color:#1e40af;'><strong>🚚 Pickup:</strong> Staff will arrive shortly to collect all items</p>
+            <p style='margin:5px 0 0 0;color:#1e40af;'><strong>Pickup by:</strong> {$returned_by}</p>
+            </div>
+            <div style='background:#fef3c7;padding:15px;border-radius:8px;border-left:4px solid #f59e0b;margin-top:15px;'>
+            <p style='margin:0;color:#92400e;'><strong>📍 Pickup Address:</strong> " . htmlspecialchars($req['address']) . "</p>
+            </div>",
+            
+        'returned' => "<h2 style='color:#16a34a;'>✅ Group Equipment Return Confirmed</h2>
+            <p>Dear <strong>" . htmlspecialchars($req['user_name']) . "</strong>,</p>
+            <p>All your equipment items have been successfully returned.</p>
+            <div style='background:#dcfce7;padding:20px;border-radius:8px;margin:20px 0;border-left:4px solid #16a34a;'>
+            <p style='margin:0 0 10px 0;'><strong>📦 {$itemCount} Items Returned:</strong></p>
+            <ul style='margin:0;padding-left:20px;'>{$itemsList}</ul>
+            </div>
+            <div style='background:#f0fdf4;padding:20px;border-radius:8px;margin:20px 0;'>
+            <p><strong>Received by:</strong> {$returned_by}</p>
+            <p style='color:#16a34a;'><strong>Status:</strong> All items checked - No damage ✓</p>
+            </div>
+            <p style='color:#16a34a;font-weight:bold;'>Thank you for taking care of the equipment!</p>"
+    ];
+    
+    return $header . ($templates[$type] ?? '') . $footer;
+}
+
 ?>

@@ -20,19 +20,56 @@ $current_page = max(1, $current_page);
 // Calculate offset
 $offset = ($current_page - 1) * $records_per_page;
 
-// Get total number of records
-$count_sql = "SELECT COUNT(*) as total FROM borrow_requests WHERE user_id=$user_id";
+// Get total number of DISTINCT requests (counting groups as 1)
+$count_sql = "SELECT COUNT(DISTINCT COALESCE(group_request_id, CONCAT('single_', id))) as total 
+              FROM borrow_requests 
+              WHERE user_id=$user_id";
 $count_result = $conn->query($count_sql);
 $total_records = $count_result->fetch_assoc()['total'];
 $total_pages = ceil($total_records / $records_per_page);
 
-// Get paginated records
-$sql = "SELECT br.*, e.name AS equipment, e.image AS equipment_image
-        FROM borrow_requests br
-        JOIN equipment e ON br.equipment_id = e.id
-        WHERE br.user_id=$user_id
-        ORDER BY br.created_at DESC
-        LIMIT $records_per_page OFFSET $offset";
+// Get paginated records - group by group_request_id for group requests
+$sql = "SELECT 
+    br.id,
+    br.user_id,
+    br.group_request_id,
+    br.borrow_date,
+    br.return_date,
+    br.status,
+    br.priority,
+    br.purpose,
+    br.created_at,
+    CASE 
+        WHEN br.group_request_id IS NOT NULL THEN 'group'
+        ELSE 'single'
+    END as request_type,
+    CASE 
+        WHEN br.group_request_id IS NOT NULL THEN (
+            SELECT COUNT(*) FROM borrow_requests 
+            WHERE group_request_id = br.group_request_id
+        )
+        ELSE 1
+    END as item_count,
+    GROUP_CONCAT(DISTINCT e.name ORDER BY e.name SEPARATOR ', ') as equipment_names,
+    GROUP_CONCAT(DISTINCT e.image ORDER BY e.name SEPARATOR ',') as equipment_images,
+    SUM(br.qty) as total_qty
+FROM borrow_requests br
+JOIN equipment e ON br.equipment_id = e.id
+WHERE br.user_id = $user_id
+GROUP BY 
+    CASE 
+        WHEN br.group_request_id IS NOT NULL THEN CONCAT('group_', br.group_request_id)
+        ELSE CONCAT('single_', br.id)
+    END,
+    br.borrow_date,
+    br.return_date,
+    br.status,
+    br.priority,
+    br.purpose,
+    br.created_at
+ORDER BY br.created_at DESC
+LIMIT $records_per_page OFFSET $offset";
+
 $result = $conn->query($sql);
 ?>
 <!DOCTYPE html>
@@ -69,13 +106,17 @@ $result = $conn->query($sql);
       <div class="block md:hidden">
         <?php if ($result->num_rows > 0): ?>
           <?php $result->data_seek(0); ?>
-          <?php while ($row = $result->fetch_assoc()): ?>
+          <?php while ($row = $result->fetch_assoc()): 
+            $is_group = $row['request_type'] == 'group';
+            $equipment_images = !empty($row['equipment_images']) ? explode(',', $row['equipment_images']) : [];
+            $first_image = !empty($equipment_images) ? $equipment_images[0] : '';
+          ?>
             <div class="p-4 border-b border-gray-200 last:border-0 hover:bg-blue-50 transition">
               <div class="flex items-start gap-3 mb-3">
-                <div class="flex-shrink-0 h-16 w-16 rounded-lg overflow-hidden bg-gray-100 border border-gray-200">
-                  <?php if (!empty($row['equipment_image'])): ?>
-                    <img src="../photos/<?php echo htmlspecialchars($row['equipment_image']); ?>" 
-                         alt="<?php echo htmlspecialchars($row['equipment']); ?>" 
+                <div class="flex-shrink-0 h-16 w-16 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 relative">
+                  <?php if (!empty($first_image)): ?>
+                    <img src="../photos/<?php echo htmlspecialchars($first_image); ?>" 
+                         alt="Equipment" 
                          class="h-full w-full object-cover"
                          onerror="this.parentElement.innerHTML='<div class=\'h-full w-full flex items-center justify-center bg-blue-100\'><i data-feather=\'package\' class=\'text-blue-600 w-6 h-6\'></i></div>'; feather.replace();">
                   <?php else: ?>
@@ -83,12 +124,42 @@ $result = $conn->query($sql);
                       <i data-feather="package" class="text-blue-600 w-6 h-6"></i>
                     </div>
                   <?php endif; ?>
+                  <?php if ($is_group): ?>
+                    <div class="absolute -top-1 -right-1 bg-purple-600 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center shadow-lg">
+                      <?php echo $row['item_count']; ?>
+                    </div>
+                  <?php endif; ?>
                 </div>
                 <div class="flex-1 min-w-0">
-                  <h3 class="font-semibold text-gray-900 text-sm mb-1"><?php echo htmlspecialchars($row['equipment']); ?></h3>
-                  <div class="flex items-center gap-2 mb-2">
+                  <?php if ($is_group): ?>
+                    <div class="flex items-center gap-2 mb-1">
+                      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-700 border border-purple-300">
+                        <i data-feather="layers" class="w-3 h-3 mr-1"></i>
+                        Group Request
+                      </span>
+                      <?php if ($row['priority'] == 1): ?>
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-300">
+                          <i data-feather="alert-circle" class="w-3 h-3 mr-1"></i>
+                          Priority
+                        </span>
+                      <?php endif; ?>
+                    </div>
+                    <h3 class="font-semibold text-gray-900 text-sm mb-1"><?php echo $row['item_count']; ?> Items</h3>
+                    <p class="text-xs text-gray-600 line-clamp-2"><?php echo htmlspecialchars($row['equipment_names']); ?></p>
+                  <?php else: ?>
+                    <div class="flex items-center gap-2 mb-1">
+                      <?php if ($row['priority'] == 1): ?>
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-300">
+                          <i data-feather="alert-circle" class="w-3 h-3 mr-1"></i>
+                          Priority
+                        </span>
+                      <?php endif; ?>
+                    </div>
+                    <h3 class="font-semibold text-gray-900 text-sm mb-1"><?php echo htmlspecialchars($row['equipment_names']); ?></h3>
+                  <?php endif; ?>
+                  <div class="flex items-center gap-2 mt-2">
                     <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-800">
-                      Qty: <?php echo $row['qty']; ?>
+                      Qty: <?php echo $row['total_qty']; ?>
                     </span>
                     <?php
                     $status = strtolower($row['status']);
@@ -139,6 +210,7 @@ $result = $conn->query($sql);
           <thead class="bg-gradient-to-r from-blue-900 to-blue-700">
             <tr>
               <th class="px-6 py-4 text-left text-xs font-bold text-white uppercase tracking-wider">Equipment</th>
+              <th class="px-6 py-4 text-left text-xs font-bold text-white uppercase tracking-wider">Type</th>
               <th class="px-6 py-4 text-left text-xs font-bold text-white uppercase tracking-wider">Quantity</th>
               <th class="px-6 py-4 text-left text-xs font-bold text-white uppercase tracking-wider">Borrow Date</th>
               <th class="px-6 py-4 text-left text-xs font-bold text-white uppercase tracking-wider">Return Date</th>
@@ -148,14 +220,18 @@ $result = $conn->query($sql);
           <tbody class="bg-white divide-y divide-gray-200">
             <?php $result->data_seek(0); ?>
             <?php if ($result->num_rows > 0): ?>
-              <?php while ($row = $result->fetch_assoc()): ?>
+              <?php while ($row = $result->fetch_assoc()): 
+                $is_group = $row['request_type'] == 'group';
+                $equipment_images = !empty($row['equipment_images']) ? explode(',', $row['equipment_images']) : [];
+                $first_image = !empty($equipment_images) ? $equipment_images[0] : '';
+              ?>
                 <tr class="hover:bg-blue-50 transition duration-150 ease-in-out">
                   <td class="px-6 py-4">
                     <div class="flex items-center">
-                      <div class="flex-shrink-0 h-12 w-12 rounded-lg overflow-hidden bg-gray-100 border border-gray-200">
-                        <?php if (!empty($row['equipment_image'])): ?>
-                          <img src="../photos/<?php echo htmlspecialchars($row['equipment_image']); ?>" 
-                               alt="<?php echo htmlspecialchars($row['equipment']); ?>" 
+                      <div class="flex-shrink-0 h-12 w-12 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 relative">
+                        <?php if (!empty($first_image)): ?>
+                          <img src="../photos/<?php echo htmlspecialchars($first_image); ?>" 
+                               alt="Equipment" 
                                class="h-full w-full object-cover"
                                onerror="this.parentElement.innerHTML='<div class=\'h-full w-full flex items-center justify-center bg-blue-100\'><i data-feather=\'package\' class=\'text-blue-600 w-6 h-6\'></i></div>'; feather.replace();">
                         <?php else: ?>
@@ -163,15 +239,46 @@ $result = $conn->query($sql);
                             <i data-feather="package" class="text-blue-600 w-6 h-6"></i>
                           </div>
                         <?php endif; ?>
+                        <?php if ($is_group): ?>
+                          <div class="absolute -top-1 -right-1 bg-purple-600 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center shadow-lg">
+                            <?php echo $row['item_count']; ?>
+                          </div>
+                        <?php endif; ?>
                       </div>
                       <div class="ml-4">
-                        <div class="text-sm font-semibold text-gray-900"><?php echo htmlspecialchars($row['equipment']); ?></div>
+                        <?php if ($is_group): ?>
+                          <div class="text-sm font-semibold text-gray-900 mb-1"><?php echo $row['item_count']; ?> Items</div>
+                          <div class="text-xs text-gray-600 max-w-xs"><?php echo htmlspecialchars($row['equipment_names']); ?></div>
+                        <?php else: ?>
+                          <div class="text-sm font-semibold text-gray-900"><?php echo htmlspecialchars($row['equipment_names']); ?></div>
+                        <?php endif; ?>
                       </div>
                     </div>
                   </td>
                   <td class="px-6 py-4">
+                    <?php if ($is_group): ?>
+                      <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-purple-100 text-purple-700 border border-purple-300">
+                        <i data-feather="layers" class="w-4 h-4 mr-1"></i>
+                        Group
+                      </span>
+                    <?php else: ?>
+                      <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-blue-100 text-blue-700 border border-blue-300">
+                        <i data-feather="box" class="w-4 h-4 mr-1"></i>
+                        Single
+                      </span>
+                    <?php endif; ?>
+                    <?php if ($row['priority'] == 1): ?>
+                      <div class="mt-1">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-300">
+                          <i data-feather="alert-circle" class="w-3 h-3 mr-1"></i>
+                          Priority
+                        </span>
+                      </div>
+                    <?php endif; ?>
+                  </td>
+                  <td class="px-6 py-4">
                     <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-gray-100 text-gray-800">
-                      <?php echo $row['qty']; ?>
+                      <?php echo $row['total_qty']; ?>
                     </span>
                   </td>
                   <td class="px-6 py-4">
@@ -207,7 +314,7 @@ $result = $conn->query($sql);
               <?php endwhile; ?>
             <?php else: ?>
               <tr>
-                <td colspan="5" class="px-6 py-12 text-center">
+                <td colspan="6" class="px-6 py-12 text-center">
                   <div class="flex flex-col items-center justify-center">
                     <div class="bg-gray-100 rounded-full p-4 mb-4">
                       <i data-feather="inbox" class="w-12 h-12 text-gray-400"></i>

@@ -10,7 +10,7 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'admin') {
     exit();
 }
 
-// Store admin name in session for modal display (ADD THIS SECTION)
+// Store admin name in session for modal display
 if (!isset($_SESSION['user_name'])) {
     $admin_id = $_SESSION['user_id'];
     $result = $conn->query("SELECT name FROM users WHERE id=$admin_id");
@@ -19,14 +19,35 @@ if (!isset($_SESSION['user_name'])) {
     }
 }
 
-// Handle POST actions from any sub-tab
+// Handle POST actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    handleRequestAction($conn, $_POST);
+    $action = $_POST['action'];
+    
+    // Group request actions (approval/rejection)
+    if (in_array($action, ['approve_group', 'reject_group'])) {
+        handleGroupRequestAction($conn, $_POST);
+    }
+    // Group delivery action
+    elseif ($action === 'deliver_group') {
+        handleGroupDeliveryAction($conn, $_POST, $_FILES);
+    }
+    // Group return approval action
+    elseif ($action === 'approve_group_return') {
+        handleGroupReturnApproval($conn, $_POST);
+    }
+    // Group return marking action
+    elseif ($action === 'mark_group_returned') {
+        handleGroupReturn($conn, $_POST, $_FILES);
+    }
+    // Individual request actions
+    else {
+        handleRequestAction($conn, $_POST);
+    }
 }
 
 // Determine active tab
 $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'pending';
-$valid_tabs = ['pending', 'approved', 'delivered', 'return_requests', 'returned', 'damaged'];
+$valid_tabs = ['pending', 'approved', 'delivered', 'return_requests', 'returned'];
 if (!in_array($active_tab, $valid_tabs)) $active_tab = 'pending';
 
 // Get counts for badges
@@ -68,8 +89,7 @@ $counts = getRequestCounts($conn);
             'approved' => ['label' => 'Approved', 'icon' => 'check-circle', 'color' => 'green'],
             'delivered' => ['label' => 'Delivered', 'icon' => 'truck', 'color' => 'blue'],
             'return_requests' => ['label' => 'Return Requests', 'icon' => 'corner-down-left', 'color' => 'orange'],
-            'returned' => ['label' => 'Returned', 'icon' => 'check-square', 'color' => 'gray'],
-            'damaged' => ['label' => 'Damaged', 'icon' => 'alert-triangle', 'color' => 'red']
+            'returned' => ['label' => 'Returned', 'icon' => 'check-square', 'color' => 'gray']
         ];
         foreach ($tabs as $key => $tab):
             $is_active = ($active_tab === $key);
